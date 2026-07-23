@@ -8,6 +8,7 @@ from scripts.assure_common import AssureError
 from scripts.assure_mocks import inject_mocks
 from scripts.assure_runners import build_runner_command
 from scripts.assure_sandbox import SandboxUnavailable, prepare_sandbox
+from scripts.run_verification import execute_manifest
 
 
 class SafetyModuleTests(unittest.TestCase):
@@ -39,6 +40,37 @@ class SafetyModuleTests(unittest.TestCase):
             result = inject_mocks(root, "vitest")
             self.assertIn("firebase: user mock preserved", result.conflicts)
             self.assertTrue((root / ".assure-auto-mocks.ts").exists())
+
+    def test_missing_sandbox_still_returns_a_final_summary(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            assure = root / ".assure"
+            assure.mkdir()
+            manifest = assure / "verification-manifest.yaml"
+            manifest.write_text(
+                "schema_version: 1\n"
+                "baseline:\n"
+                "  status: approved\n"
+                "  commit: '0000000000000000000000000000000000000000'\n"
+                "sections:\n"
+                "  - id: app\n"
+                "    name: App\n"
+                "    scenarios:\n"
+                "      - id: app.test\n"
+                "        name: Test\n"
+                "        risk: critical\n"
+                "        verification:\n"
+                "          mode: automated\n"
+                "          tests:\n"
+                "            - runner: vitest\n"
+                "              args: [run]\n",
+                encoding="utf-8",
+            )
+            with patch("scripts.run_verification.prepare_sandbox", side_effect=SandboxUnavailable("sandbox runtime is unavailable")):
+                summary = execute_manifest(root, manifest)
+            self.assertEqual(summary["verdict"], "blocked")
+            self.assertEqual(summary["results"][0]["status"], "?")
+            self.assertEqual(summary["sandbox"]["network"], "not-run")
 
 
 if __name__ == "__main__":

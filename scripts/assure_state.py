@@ -9,6 +9,7 @@ if __package__:
         AssureError,
         committed_source_changed_since,
         load_manifest,
+        source_changed_since,
         source_snapshot,
     )
     from .assure_output import emit_json
@@ -17,6 +18,7 @@ else:
         AssureError,
         committed_source_changed_since,
         load_manifest,
+        source_changed_since,
         source_snapshot,
     )
     from assure_output import emit_json
@@ -59,8 +61,18 @@ def classify_project(project_root: Path) -> ProjectState:
     if not isinstance(baseline_commit, str) or not baseline_commit:
         return ProjectState("damaged", **base, reason="approved baseline commit is missing")
     baseline_snapshot = manifest["baseline"].get("source_snapshot")
+    if baseline_snapshot is None:
+        try:
+            changed = source_changed_since(root, baseline_commit)
+        except AssureError as exc:
+            return ProjectState("damaged", **base, reason=f"git state unavailable: {exc}")
+        return ProjectState(
+            "approved-stale" if changed else "approved-current",
+            **base,
+            reason="legacy baseline without source snapshot",
+        )
     if not isinstance(baseline_snapshot, str) or len(baseline_snapshot) != 64:
-        return ProjectState("damaged", **base, reason="approved baseline source snapshot is missing")
+        return ProjectState("damaged", **base, reason="approved baseline source snapshot is invalid")
     try:
         committed_changed = committed_source_changed_since(root, baseline_commit)
     except AssureError as exc:
