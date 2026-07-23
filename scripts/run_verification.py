@@ -279,7 +279,7 @@ def run_automated(
             command = sandbox.wrap(runner_command.argv(), test["runner"])
             log_handle.write(f"$ {' '.join(command)}\n")
             log_handle.flush()
-            # shell=True is limited to commands in a human-approved manifest.
+            # Runner adapters always return argument arrays; no shell is used.
             process, job = _start_automated_process(
                 command,
                 sandbox.root,
@@ -536,19 +536,66 @@ def execute_manifest(
     artifacts = assure_dir / "artifacts" / timestamp
     results: list[dict[str, Any]] = []
     sandbox = None
+    sandbox_provider = None
     mock_result = None
+    bootstrap = {
+        "status": "not-required",
+        "detail": "no automated scenarios",
+        "network": "not-used",
+    }
+    sandbox_cleanup = {
+        "status": "not-required",
+        "detail": "no sandbox was created",
+    }
     automated = any(item["verification"]["mode"] == "automated" for item in scenarios)
     if automated:
         try:
             sandbox = prepare_sandbox(project_root)
-            framework = next(
+            sandbox_provider = sandbox.provider
+            runners = {
                 test["runner"]
                 for item in scenarios
                 if item["verification"]["mode"] == "automated"
                 for test in item["verification"]["tests"]
-            )
-            mock_result = inject_mocks(sandbox.root, framework)
+            }
+            bootstrap_result = sandbox.bootstrap(runners)
+            bootstrap = {
+                "status": bootstrap_result.status,
+                "detail": bootstrap_result.detail,
+                "network": bootstrap_result.network,
+            }
+            if bootstrap_result.status != "ready":
+                raise SandboxUnavailable(bootstrap_result.detail)
+            for framework in sorted(runners):
+                injected = inject_mocks(sandbox.root, framework)
+                if mock_result is None:
+                    mock_result = injected
+                else:
+                    mock_result.injected.extend(injected.injected)
+                    mock_result.conflicts.extend(injected.conflicts)
+                    mock_result.unverifiable.extend(injected.unverifiable)
+            if mock_result and mock_result.unverifiable:
+                raise SandboxUnavailable("; ".join(mock_result.unverifiable))
         except SandboxUnavailable as exc:
+            if bootstrap["status"] == "not-required":
+                bootstrap = {
+                    "status": "unavailable",
+                    "detail": str(exc),
+                    "network": "not-used",
+                }
+            if sandbox is not None:
+                try:
+                    sandbox.cleanup()
+                    sandbox_cleanup = {
+                        "status": "removed",
+                        "detail": "Assure-owned sandbox removed",
+                    }
+                except AssureError as cleanup_exc:
+                    sandbox_cleanup = {
+                        "status": "refused",
+                        "detail": str(cleanup_exc),
+                    }
+                sandbox = None
             for scenario in scenarios:
                 if scenario["verification"]["mode"] == "automated":
                     item = result_for_non_automated({
@@ -570,7 +617,17 @@ def execute_manifest(
                     results.append(result_for_non_automated(scenario))
         finally:
             if sandbox is not None:
-                sandbox.cleanup()
+                try:
+                    sandbox.cleanup()
+                    sandbox_cleanup = {
+                        "status": "removed",
+                        "detail": "Assure-owned sandbox removed",
+                    }
+                except AssureError as cleanup_exc:
+                    sandbox_cleanup = {
+                        "status": "refused",
+                        "detail": str(cleanup_exc),
+                    }
     counts = count_statuses(results)
     summary = {
         "language": detect_language(project_root),
@@ -582,9 +639,11 @@ def execute_manifest(
         "counts": counts,
         "results": results,
         "sandbox": {
-            "provider": sandbox.provider if sandbox else None,
+            "provider": sandbox_provider,
             "network": sandbox.network if sandbox else "not-run",
+            "cleanup": sandbox_cleanup,
         },
+        "bootstrap": bootstrap,
         "automatic_mocks": {
             "injected": mock_result.injected if mock_result else [],
             "conflicts": mock_result.conflicts if mock_result else [],

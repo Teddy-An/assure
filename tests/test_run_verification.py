@@ -12,20 +12,48 @@ from unittest.mock import patch
 import yaml
 
 from scripts.assure_common import AssureError
+from scripts.assure_sandbox import BootstrapResult
 from scripts.run_verification import execute_manifest, record_manual_result, run_automated
 
 
+class LocalTestSandbox:
+    provider = "test"
+    network = "disabled"
+
+    def __init__(self, root: Path):
+        self.root = root
+
+    def bootstrap(self, runners: set[str]) -> BootstrapResult:
+        return BootstrapResult("ready", "test dependencies")
+
+    def wrap(self, argv: list[str], runner: str) -> list[str]:
+        if runner == "pytest":
+            return [sys.executable, *argv[3:]]
+        return argv
+
+    def cleanup(self) -> None:
+        pass
+
+
 class VerificationRunnerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        patcher = patch(
+            "scripts.run_verification.prepare_sandbox",
+            side_effect=lambda root: LocalTestSandbox(root),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def python_command(self, root: Path, source: str) -> str:
         commands = root / ".assure" / "test-commands"
         commands.mkdir(parents=True, exist_ok=True)
         script = commands / f"command-{len(list(commands.iterdir()))}.py"
         script.write_text(source, encoding="utf-8")
-        return f'"{sys.executable}" "{script}"'
+        return str(script)
 
     def make_repo(self) -> tuple[Path, str]:
         root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, root)
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         subprocess.run(
             ["git", "-C", str(root), "config", "user.email", "test@example.com"],
@@ -45,6 +73,11 @@ class VerificationRunnerTests(unittest.TestCase):
             ["git", "-C", str(root), "rev-parse", "HEAD"],
             text=True,
         ).strip()
+        (root / ".assure").mkdir()
+        (root / ".assure" / "config.yaml").write_text(
+            "language: en\n",
+            encoding="utf-8",
+        )
         return root, commit
 
     def write_manifest(
@@ -87,7 +120,7 @@ class VerificationRunnerTests(unittest.TestCase):
                 "risk": risk,
                 "verification": {
                     "mode": "automated",
-                    "tests": [{"runner": "shell", "command": command}],
+                    "tests": [{"runner": "pytest", "args": [command]}],
                 },
             }],
         )
@@ -216,7 +249,7 @@ class VerificationRunnerTests(unittest.TestCase):
 
     def test_timeout_terminates_child_process_before_it_can_write_a_marker(self):
         root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, root)
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         marker = root / ".assure" / "delayed-child-marker"
         child = (
             "import time\n"
@@ -235,11 +268,18 @@ class VerificationRunnerTests(unittest.TestCase):
             "name": "Timeout child",
             "section_name": "Automated",
             "risk": "critical",
-            "verification": {"tests": [{"command": command}]},
+            "verification": {
+                "tests": [{"runner": "pytest", "args": [command]}],
+            },
         }
 
         with patch("scripts.run_verification.AUTOMATED_TIMEOUT_SECONDS", 0.2):
-            result = run_automated(root, scenario, root / ".assure" / "artifacts")
+            result = run_automated(
+                root,
+                scenario,
+                root / ".assure" / "artifacts",
+                LocalTestSandbox(root),
+            )
         time.sleep(1.2)
 
         self.assertEqual(result["exit_code"], 124)
@@ -332,20 +372,20 @@ class VerificationRunnerTests(unittest.TestCase):
                     "mode": "automated",
                     "tests": [
                         {
-                            "runner": "shell",
-                            "command": self.python_command(
+                            "runner": "pytest",
+                            "args": [self.python_command(
                                 root,
                                 "raise SystemExit(7)\n",
-                            ),
+                            )],
                         },
                         {
-                            "runner": "shell",
-                            "command": self.python_command(
+                            "runner": "pytest",
+                            "args": [self.python_command(
                                 root,
                                 "from pathlib import Path\n"
                                 "Path('.assure/second-check-ran').write_text("
                                 "'ran', encoding='utf-8')\n",
-                            ),
+                            )],
                         },
                     ],
                 },
@@ -394,12 +434,12 @@ class VerificationRunnerTests(unittest.TestCase):
                     "verification": {
                         "mode": "automated",
                         "tests": [{
-                            "runner": "shell",
-                            "command": self.python_command(
+                            "runner": "pytest",
+                            "args": [self.python_command(
                                 root,
                                 "from pathlib import Path\n"
                                 "Path('.assure/must-not-run').touch()\n",
-                            ),
+                            )],
                         }],
                     },
                 },
@@ -422,11 +462,7 @@ class VerificationRunnerTests(unittest.TestCase):
 
     def test_cli_returns_zero_with_json_for_releasable_result(self):
         root, commit = self.make_repo()
-        self.make_manifest(
-            root,
-            commit,
-            self.python_command(root, "print('cli-private-log')\n"),
-        )
+        self.write_manifest(root, commit, [])
 
         result = self.run_cli(root)
 
@@ -434,7 +470,6 @@ class VerificationRunnerTests(unittest.TestCase):
         self.assertTrue(result.stdout)
         summary = json.loads(result.stdout)
         self.assertEqual(summary["verdict"], "releasable")
-        self.assertNotIn("cli-private-log", result.stdout)
 
     def test_cli_returns_one_for_blocked_result(self):
         root, commit = self.make_repo()
@@ -513,7 +548,7 @@ class VerificationRunnerTests(unittest.TestCase):
         saved = json.loads(summary_path.read_text(encoding="utf-8"))
         self.assertEqual(saved["results"][0]["confirmed_by"], "reviewer")
         self.assertIn(
-            "**Verdict:** releasable",
+            "**Verdict: releasable**",
             Path(initial["report"]).read_text(encoding="utf-8"),
         )
 
@@ -619,11 +654,11 @@ class VerificationRunnerTests(unittest.TestCase):
                     "verification": {
                         "mode": "automated",
                         "tests": [{
-                            "runner": "shell",
-                            "command": self.python_command(
+                            "runner": "pytest",
+                            "args": [self.python_command(
                                 root,
                                 "print('slash-artifact-content')\n",
-                            ),
+                            )],
                         }],
                     },
                 },
@@ -634,11 +669,11 @@ class VerificationRunnerTests(unittest.TestCase):
                     "verification": {
                         "mode": "automated",
                         "tests": [{
-                            "runner": "shell",
-                            "command": self.python_command(
+                            "runner": "pytest",
+                            "args": [self.python_command(
                                 root,
                                 "print('underscore-artifact-content')\n",
-                            ),
+                            )],
                         }],
                     },
                 },

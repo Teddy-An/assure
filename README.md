@@ -29,10 +29,13 @@ approval, and verification. Manual checks and missing capabilities are
 reported in the final result instead of interrupting the run.
 
 Automated checks run only in an independent temporary copy through Docker or
-Podman with networking disabled. Project mocks take priority; Assure injects
+Podman with networking disabled. Before the test phase, Assure may download
+lockfile-pinned dependencies in a credential-free container; package lifecycle
+scripts and binary links stay disabled. A missing lockfile or failed bootstrap
+becomes a final environment result. Project mocks take priority; Assure injects
 additional guards for fetch, WebSocket, HTTP/HTTPS, and supported Firebase
-boundaries. If a safe sandbox is unavailable, Assure returns
-`sandbox-unavailable` and never falls back to the original working tree.
+boundaries. If a safe sandbox is unavailable, Assure returns a blocked final
+result and never falls back to the original working tree.
 
 Human-facing output follows `.assure/config.yaml` `language: ko|en`; without
 an override, Korean locales use Korean and other locales use English.
