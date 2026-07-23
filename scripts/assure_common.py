@@ -2,9 +2,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
+
+if __package__:
+    from .detect_environment import EXCLUDED_DIRECTORIES
+else:
+    from detect_environment import EXCLUDED_DIRECTORIES
+
+
+CANDIDATE_SUFFIXES = {
+    ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb",
+    ".rs", ".swift", ".ts", ".tsx", ".vue",
+}
 
 class AssureError(RuntimeError):
     pass
@@ -36,7 +48,7 @@ def git_head(project_root: Path) -> str:
     return run_text(["git", "rev-parse", "HEAD"], project_root)
 
 
-def source_changed_since(project_root: Path, baseline_commit: str) -> bool:
+def committed_source_changed_since(project_root: Path, baseline_commit: str) -> bool:
     try:
         committed = subprocess.run(
             [
@@ -46,6 +58,16 @@ def source_changed_since(project_root: Path, baseline_commit: str) -> bool:
             cwd=project_root,
             timeout=15,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise AssureError("Git command timed out after 15 seconds") from exc
+    if committed.returncode not in {0, 1}:
+        raise AssureError("baseline commit cannot be compared")
+    return committed.returncode == 1
+
+
+def source_changed_since(project_root: Path, baseline_commit: str) -> bool:
+    committed_changed = committed_source_changed_since(project_root, baseline_commit)
+    try:
         working = subprocess.run(
             [
                 "git", "status", "--porcelain=v1", "-z",
@@ -57,8 +79,6 @@ def source_changed_since(project_root: Path, baseline_commit: str) -> bool:
         )
     except subprocess.TimeoutExpired as exc:
         raise AssureError("Git command timed out after 15 seconds") from exc
-    if committed.returncode not in {0, 1}:
-        raise AssureError("baseline commit cannot be compared")
     if working.returncode != 0:
         detail = working.stderr.decode(errors="replace").strip()
         raise AssureError(detail or "working tree cannot be inspected")
@@ -76,7 +96,31 @@ def source_changed_since(project_root: Path, baseline_commit: str) -> bool:
                 raise AssureError("working tree status cannot be parsed") from exc
         if not all(path.startswith(b".assure/") for path in paths):
             return True
-    return committed.returncode == 1
+    return committed_changed
+
+
+def candidate_source_files(project_root: Path) -> list[Path]:
+    root = project_root.resolve()
+    files: list[Path] = []
+    for directory, names, filenames in os.walk(root):
+        names[:] = sorted(name for name in names if name not in EXCLUDED_DIRECTORIES)
+        base = Path(directory)
+        for name in sorted(filenames):
+            path = base / name
+            if path.suffix.lower() in CANDIDATE_SUFFIXES:
+                files.append(path)
+    return files
+
+
+def source_snapshot(project_root: Path) -> str:
+    root = project_root.resolve()
+    digest = hashlib.sha256()
+    for path in candidate_source_files(root):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(sha256_file(path).encode("ascii"))
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def load_manifest(path: Path) -> dict[str, Any]:

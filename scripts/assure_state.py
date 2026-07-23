@@ -5,10 +5,20 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 if __package__:
-    from .assure_common import AssureError, load_manifest, source_changed_since
+    from .assure_common import (
+        AssureError,
+        committed_source_changed_since,
+        load_manifest,
+        source_snapshot,
+    )
     from .assure_output import emit_json
 else:
-    from assure_common import AssureError, load_manifest, source_changed_since
+    from assure_common import (
+        AssureError,
+        committed_source_changed_since,
+        load_manifest,
+        source_snapshot,
+    )
     from assure_output import emit_json
 
 
@@ -48,20 +58,29 @@ def classify_project(project_root: Path) -> ProjectState:
     baseline_commit = manifest["baseline"].get("commit")
     if not isinstance(baseline_commit, str) or not baseline_commit:
         return ProjectState("damaged", **base, reason="approved baseline commit is missing")
+    baseline_snapshot = manifest["baseline"].get("source_snapshot")
+    if not isinstance(baseline_snapshot, str) or len(baseline_snapshot) != 64:
+        return ProjectState("damaged", **base, reason="approved baseline source snapshot is missing")
     try:
-        changed = source_changed_since(root, baseline_commit)
+        committed_changed = committed_source_changed_since(root, baseline_commit)
     except AssureError as exc:
         return ProjectState("damaged", **base, reason=f"git state unavailable: {exc}")
-    if not changed:
+    if committed_changed:
+        return ProjectState(
+            "approved-stale",
+            **base,
+            reason=f"product source changed since {baseline_commit}",
+        )
+    if source_snapshot(root) == baseline_snapshot:
         return ProjectState(
             "approved-current",
             **base,
-            reason="no product-source changes since baseline",
+            reason="product-source snapshot matches baseline",
         )
     return ProjectState(
         "approved-stale",
         **base,
-        reason=f"product source changed since {baseline_commit}",
+        reason="product-source snapshot differs from baseline",
     )
 
 

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.assure_common import AssureError, run_text
+from scripts.assure_common import AssureError, run_text, source_snapshot
 from scripts.assure_state import classify_project
 
 
@@ -22,10 +22,30 @@ class ProjectStateTests(unittest.TestCase):
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.com"], check=True)
         subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
-        (root / "tracked.txt").write_text("v1\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(root), "add", "tracked.txt"], check=True)
+        (root / "tracked.py").write_text("print('v1')\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "tracked.py"], check=True)
         subprocess.run(["git", "-C", str(root), "commit", "-qm", "baseline"], check=True)
         return root
+
+    def write_approved_manifest(self, root: Path, commit: str, snapshot: str) -> None:
+        assure = root / ".assure"
+        assure.mkdir(exist_ok=True)
+        (assure / "verification-manifest.yaml").write_text(
+            "schema_version: 1\nbaseline:\n"
+            f"  status: approved\n  commit: {commit}\n  source_snapshot: {snapshot}\n"
+            "sections: []\n",
+            encoding="utf-8",
+        )
+
+    def update_manifest_snapshot(self, root: Path, snapshot: str) -> None:
+        path = root / ".assure" / "verification-manifest.yaml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "source_snapshot: " + source_snapshot(root),
+                f"source_snapshot: {snapshot}",
+            ),
+            encoding="utf-8",
+        )
 
     def test_absent_when_no_assure_state_exists(self):
         root = self.make_repo()
@@ -36,12 +56,17 @@ class ProjectStateTests(unittest.TestCase):
         commit = subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
         ).strip()
-        assure = root / ".assure"
-        assure.mkdir()
-        (assure / "verification-manifest.yaml").write_text(
-            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
-            encoding="utf-8",
-        )
+        self.write_approved_manifest(root, commit, source_snapshot(root))
+        self.assertEqual(classify_project(root).kind, "approved-current")
+
+    def test_approved_current_with_uncommitted_files_matching_snapshot(self):
+        root = self.make_repo()
+        commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        self.write_approved_manifest(root, commit, source_snapshot(root))
+        (root / "uncommitted.txt").write_text("same", encoding="utf-8")
+        self.update_manifest_snapshot(root, source_snapshot(root))
         self.assertEqual(classify_project(root).kind, "approved-current")
 
     def test_approved_stale_when_commit_differs(self):
@@ -49,15 +74,10 @@ class ProjectStateTests(unittest.TestCase):
         baseline_commit = subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
         ).strip()
-        (root / "tracked.txt").write_text("v2\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(root), "add", "tracked.txt"], check=True)
+        (root / "tracked.py").write_text("print('v2')\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "tracked.py"], check=True)
         subprocess.run(["git", "-C", str(root), "commit", "-qm", "source change"], check=True)
-        assure = root / ".assure"
-        assure.mkdir()
-        (assure / "verification-manifest.yaml").write_text(
-            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {baseline_commit}\nsections: []\n",
-            encoding="utf-8",
-        )
+        self.write_approved_manifest(root, baseline_commit, source_snapshot(root))
         self.assertEqual(classify_project(root).kind, "approved-stale")
 
     def test_approved_stale_when_working_tree_product_changes(self):
@@ -65,13 +85,8 @@ class ProjectStateTests(unittest.TestCase):
         commit = subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
         ).strip()
-        assure = root / ".assure"
-        assure.mkdir()
-        (assure / "verification-manifest.yaml").write_text(
-            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
-            encoding="utf-8",
-        )
-        (root / "tracked.txt").write_text("v2\n", encoding="utf-8")
+        self.write_approved_manifest(root, commit, source_snapshot(root))
+        (root / "tracked.py").write_text("print('v2')\n", encoding="utf-8")
         self.assertEqual(classify_project(root).kind, "approved-stale")
 
     def test_assure_only_changes_do_not_make_product_source_stale(self):
@@ -79,12 +94,8 @@ class ProjectStateTests(unittest.TestCase):
         commit = subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
         ).strip()
+        self.write_approved_manifest(root, commit, source_snapshot(root))
         assure = root / ".assure"
-        assure.mkdir()
-        (assure / "verification-manifest.yaml").write_text(
-            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
-            encoding="utf-8",
-        )
         (assure / "notes.txt").write_text("local result\n", encoding="utf-8")
         self.assertEqual(classify_project(root).kind, "approved-current")
 
@@ -92,9 +103,9 @@ class ProjectStateTests(unittest.TestCase):
         root = self.make_repo()
         assure = root / ".assure"
         assure.mkdir()
-        (assure / "source.txt").write_text("internal\n", encoding="utf-8")
+        (assure / "source.py").write_text("internal\n", encoding="utf-8")
         subprocess.run(
-            ["git", "-C", str(root), "add", ".assure/source.txt"], check=True
+            ["git", "-C", str(root), "add", ".assure/source.py"], check=True
         )
         subprocess.run(
             ["git", "-C", str(root), "commit", "-qm", "add assure source"], check=True
@@ -102,12 +113,9 @@ class ProjectStateTests(unittest.TestCase):
         commit = subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
         ).strip()
-        (assure / "verification-manifest.yaml").write_text(
-            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
-            encoding="utf-8",
-        )
+        self.write_approved_manifest(root, commit, source_snapshot(root))
         subprocess.run(
-            ["git", "-C", str(root), "mv", ".assure/source.txt", "product.txt"],
+            ["git", "-C", str(root), "mv", ".assure/source.py", "product.py"],
             check=True,
         )
         self.assertEqual(classify_project(root).kind, "approved-stale")
@@ -116,9 +124,9 @@ class ProjectStateTests(unittest.TestCase):
         root = self.make_repo()
         assure = root / ".assure"
         assure.mkdir()
-        (assure / "source.txt").write_text("internal\n", encoding="utf-8")
+        (assure / "source.py").write_text("internal\n", encoding="utf-8")
         subprocess.run(
-            ["git", "-C", str(root), "add", ".assure/source.txt"], check=True
+            ["git", "-C", str(root), "add", ".assure/source.py"], check=True
         )
         subprocess.run(
             ["git", "-C", str(root), "commit", "-qm", "add assure source"], check=True
@@ -126,12 +134,9 @@ class ProjectStateTests(unittest.TestCase):
         commit = subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
         ).strip()
-        (assure / "verification-manifest.yaml").write_text(
-            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
-            encoding="utf-8",
-        )
+        self.write_approved_manifest(root, commit, source_snapshot(root))
         subprocess.run(
-            ["git", "-C", str(root), "mv", ".assure/source.txt", ".assure/renamed.txt"],
+            ["git", "-C", str(root), "mv", ".assure/source.py", ".assure/renamed.py"],
             check=True,
         )
         self.assertEqual(classify_project(root).kind, "approved-current")

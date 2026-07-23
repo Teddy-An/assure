@@ -2,26 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 if __package__:
-    from .assure_common import sha256_file, write_json
-    from .detect_environment import EXCLUDED_DIRECTORIES, detect_environment
+    from .assure_common import candidate_source_files, sha256_file, source_snapshot, write_json
+    from .detect_environment import detect_environment
     from .assure_output import emit_json
 else:
-    from assure_common import sha256_file, write_json
-    from detect_environment import EXCLUDED_DIRECTORIES, detect_environment
+    from assure_common import candidate_source_files, sha256_file, source_snapshot, write_json
+    from detect_environment import detect_environment
     from assure_output import emit_json
-
-
-CANDIDATE_SUFFIXES = {
-    ".go", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb",
-    ".rs", ".swift", ".ts", ".tsx", ".vue",
-}
 
 
 def load_hashes(path: Path) -> dict[str, str]:
@@ -76,17 +69,11 @@ def collect_inventory(project_root: Path) -> dict[str, Any]:
     current: dict[str, str] = {}
     candidate_files: list[dict[str, str]] = []
 
-    for directory, names, files in os.walk(root):
-        names[:] = sorted(name for name in names if name not in EXCLUDED_DIRECTORIES)
-        base = Path(directory)
-        for name in sorted(files):
-            path = base / name
-            if path.suffix.lower() not in CANDIDATE_SUFFIXES:
-                continue
-            relative = path.relative_to(root).as_posix()
-            digest = sha256_file(path)
-            current[relative] = digest
-            candidate_files.append({"path": relative, "sha256": digest})
+    for path in candidate_source_files(root):
+        relative = path.relative_to(root).as_posix()
+        digest = sha256_file(path)
+        current[relative] = digest
+        candidate_files.append({"path": relative, "sha256": digest})
 
     changed = sorted(path for path, digest in current.items() if previous.get(path) != digest)
     unchanged = sorted(path for path, digest in current.items() if previous.get(path) == digest)
@@ -106,6 +93,7 @@ def collect_inventory(project_root: Path) -> dict[str, Any]:
 
     result = {
         "environment": detect_environment(root),
+        "source_snapshot": source_snapshot(root),
         "candidate_files": candidate_files,
         "changed_files": changed,
         "unchanged_files": unchanged,
