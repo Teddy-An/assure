@@ -4,13 +4,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
 from scripts.assure_common import AssureError
-from scripts.run_verification import execute_manifest, record_manual_result
+from scripts.run_verification import execute_manifest, record_manual_result, run_automated
 
 
 class VerificationRunnerTests(unittest.TestCase):
@@ -23,7 +25,7 @@ class VerificationRunnerTests(unittest.TestCase):
 
     def make_repo(self) -> tuple[Path, str]:
         root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, root)
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         subprocess.run(
             ["git", "-C", str(root), "config", "user.email", "test@example.com"],
@@ -211,6 +213,37 @@ class VerificationRunnerTests(unittest.TestCase):
             "large-private-log",
             Path(result["report"]).read_text(encoding="utf-8"),
         )
+
+    def test_timeout_terminates_child_process_before_it_can_write_a_marker(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root)
+        marker = root / ".assure" / "delayed-child-marker"
+        child = (
+            "import time\n"
+            "from pathlib import Path\n"
+            "time.sleep(1)\n"
+            f"Path({str(marker)!r}).write_text('created', encoding='utf-8')\n"
+        )
+        command = self.python_command(
+            root,
+            "import subprocess, sys, time\n"
+            f"subprocess.Popen([sys.executable, '-c', {child!r}])\n"
+            "time.sleep(10)\n",
+        )
+        scenario = {
+            "id": "timeout.child",
+            "name": "Timeout child",
+            "section_name": "Automated",
+            "risk": "critical",
+            "verification": {"tests": [{"command": command}]},
+        }
+
+        with patch("scripts.run_verification.AUTOMATED_TIMEOUT_SECONDS", 0.2):
+            result = run_automated(root, scenario, root / ".assure" / "artifacts")
+        time.sleep(1.2)
+
+        self.assertEqual(result["exit_code"], 124)
+        self.assertFalse(marker.exists())
 
     def test_explicit_manual_confirmation_updates_saved_summary(self):
         root, commit = self.make_repo()
@@ -554,7 +587,7 @@ class VerificationRunnerTests(unittest.TestCase):
         initial = self.make_manual_summary(root, commit)
         summary_path = Path(initial["summary_path"])
         outside = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, outside)
         outside_report = outside / "outside-report.md"
         outside_report.write_text("must remain unchanged\n", encoding="utf-8")
         payload = json.loads(summary_path.read_text(encoding="utf-8"))

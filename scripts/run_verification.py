@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
+import os
+import signal
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +23,146 @@ else:
 
 RISKS = {"critical", "high", "normal"}
 MODES = {"automated", "manual", "uncovered", "excluded"}
+AUTOMATED_TIMEOUT_SECONDS = 15
+_WINDOWS_SHELL_SUPERVISOR = (
+    "import subprocess, sys\n"
+    "if sys.stdin.buffer.read(1) != b'1':\n"
+    "    raise SystemExit(125)\n"
+    "raise SystemExit(subprocess.call(sys.argv[1], shell=True))\n"
+)
+
+
+if os.name == "nt":
+    from ctypes import wintypes
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_uint64),
+            ("WriteOperationCount", ctypes.c_uint64),
+            ("OtherOperationCount", ctypes.c_uint64),
+            ("ReadTransferCount", ctypes.c_uint64),
+            ("WriteTransferCount", ctypes.c_uint64),
+            ("OtherTransferCount", ctypes.c_uint64),
+        ]
+
+
+    class _BasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+
+    class _ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimitInformation),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    _kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    _kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    _kernel32.SetInformationJobObject.restype = wintypes.BOOL
+    _kernel32.AssignProcessToJobObject.argtypes = [
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+    ]
+    _kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+    _kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    _kernel32.TerminateJobObject.restype = wintypes.BOOL
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+
+
+def _raise_last_windows_error() -> None:
+    raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _create_windows_job() -> Any:
+    job = _kernel32.CreateJobObjectW(None, None)
+    if not job:
+        _raise_last_windows_error()
+    information = _ExtendedLimitInformation()
+    information.BasicLimitInformation.LimitFlags = 0x00002000
+    if not _kernel32.SetInformationJobObject(
+        job,
+        9,
+        ctypes.byref(information),
+        ctypes.sizeof(information),
+    ):
+        _kernel32.CloseHandle(job)
+        _raise_last_windows_error()
+    return job
+
+
+def _start_automated_process(
+    command: str,
+    project_root: Path,
+    log_handle: Any,
+) -> tuple[subprocess.Popen[Any], Any]:
+    if os.name != "nt":
+        return (
+            subprocess.Popen(
+                command,
+                cwd=project_root,
+                shell=True,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            ),
+            None,
+        )
+
+    job = _create_windows_job()
+    process = subprocess.Popen(
+        [sys.executable, "-c", _WINDOWS_SHELL_SUPERVISOR, command],
+        cwd=project_root,
+        stdin=subprocess.PIPE,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+    )
+    try:
+        if not _kernel32.AssignProcessToJobObject(job, int(process._handle)):
+            _raise_last_windows_error()
+        process.stdin.write(b"1")
+        process.stdin.close()
+        process.stdin = None
+    except BaseException:
+        process.kill()
+        process.wait()
+        _kernel32.CloseHandle(job)
+        raise
+    return process, job
+
+
+def _terminate_automated_process(
+    process: subprocess.Popen[Any],
+    job: Any,
+) -> None:
+    if os.name == "nt":
+        if not _kernel32.TerminateJobObject(job, 124):
+            _raise_last_windows_error()
+    else:
+        os.killpg(process.pid, signal.SIGKILL)
+    process.wait()
 
 
 def require_nonempty_string(value: Any, field: str) -> str:
@@ -134,19 +278,23 @@ def run_automated(
             log_handle.write(f"$ {command}\n")
             log_handle.flush()
             # shell=True is limited to commands in a human-approved manifest.
+            process, job = _start_automated_process(
+                command,
+                project_root,
+                log_handle,
+            )
             try:
-                process = subprocess.run(
-                    command,
-                    cwd=project_root,
-                    shell=True,
-                    stdout=log_handle,
-                    stderr=subprocess.STDOUT,
-                    timeout=15,
-                )
+                process.wait(timeout=AUTOMATED_TIMEOUT_SECONDS)
             except subprocess.TimeoutExpired:
-                log_handle.write("command timed out after 15 seconds\n")
+                _terminate_automated_process(process, job)
+                log_handle.write(
+                    f"command timed out after {AUTOMATED_TIMEOUT_SECONDS} seconds\n"
+                )
                 exit_code = 124
                 continue
+            finally:
+                if job is not None:
+                    _kernel32.CloseHandle(job)
             if process.returncode != 0:
                 exit_code = process.returncode
     duration = round(time.monotonic() - started, 3)
