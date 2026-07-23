@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 if __package__:
     from .assure_common import AssureError, load_manifest, source_changed_since
+    from .assure_output import emit_json
 else:
     from assure_common import AssureError, load_manifest, source_changed_since
+    from assure_output import emit_json
 
 
 @dataclass(frozen=True)
@@ -68,7 +69,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True, type=Path)
     args = parser.parse_args()
-    print(json.dumps(asdict(classify_project(args.project)), ensure_ascii=False))
+    emit_json(asdict(classify_project(args.project)))
     return 0
 
 

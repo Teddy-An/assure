@@ -15,9 +15,11 @@ from typing import Any, Optional
 
 if __package__:
     from .assure_common import AssureError, load_manifest, sha256_file, write_json
+    from .assure_output import detect_language, emit_json, localize
     from .assure_state import classify_project
 else:
     from assure_common import AssureError, load_manifest, sha256_file, write_json
+    from assure_output import detect_language, emit_json, localize
     from assure_state import classify_project
 
 
@@ -334,14 +336,16 @@ def apply_verdict(results: list[dict[str, Any]]) -> str:
 
 def render_report(summary: dict[str, Any]) -> str:
     counts = summary["counts"]
+    language = summary.get("language", "en")
+    verdict = localize(f"verdict.{summary['verdict']}", language)
     lines = [
-        "# Assure Release Verification",
+        f"# {localize('report.title', language)}",
         "",
-        f"**Verdict:** {summary['verdict']}",
-        f"**Baseline commit:** `{summary['baseline_commit']}`",
-        f"**Generated at:** {summary['generated_at']}",
+        f"**{localize('report.verdict', language, verdict=verdict)}**",
+        f"**{localize('report.baseline_commit', language, commit=summary['baseline_commit'])}**",
+        f"**{localize('report.generated_at', language, timestamp=summary['generated_at'])}**",
         "",
-        "## Summary",
+        f"## {localize('report.summary', language)}",
         "",
         f"- O: {counts.get('O', 0)}",
         f"- X: {counts.get('X', 0)}",
@@ -349,7 +353,7 @@ def render_report(summary: dict[str, Any]) -> str:
         f"- ?: {counts.get('?', 0)}",
         f"- —: {counts.get('—', 0)}",
         "",
-        "## Blocking and unresolved results",
+        f"## {localize('report.unresolved', language)}",
         "",
     ]
     unresolved = [
@@ -358,17 +362,17 @@ def render_report(summary: dict[str, Any]) -> str:
         if result["status"] in {"X", "👁", "?"}
     ]
     if not unresolved:
-        lines.append("- None")
+        lines.append(f"- {localize('report.none', language)}")
     for result in unresolved:
         lines.append(
             f"- {result['status']} `{result['id']}` — {result['name']} "
             f"(risk: {result['risk']})"
         )
         if result.get("artifact"):
-            lines.append(f"  - artifact: `{result['artifact']}`")
+            lines.append(f"  - {localize('report.artifact', language, artifact=result['artifact'])}")
         for instruction in result.get("instructions", []):
-            lines.append(f"  - manual: {instruction}")
-    lines.extend(["", "## All results", ""])
+            lines.append(f"  - {localize('report.manual', language, instruction=instruction)}")
+    lines.extend(["", f"## {localize('report.all_results', language)}", ""])
     for result in summary["results"]:
         lines.append(
             f"- {result['status']} `{result['id']}` — "
@@ -376,13 +380,13 @@ def render_report(summary: dict[str, Any]) -> str:
         )
         if result.get("mode") == "automated":
             lines.append(
-                f"  - duration: {result['duration_seconds']}s"
+                f"  - {localize('report.duration', language, duration=result['duration_seconds'])}"
             )
-            lines.append(f"  - exit code: `{result['exit_code']}`")
-            lines.append(f"  - artifact: `{result['artifact']}`")
+            lines.append(f"  - {localize('report.exit_code', language, exit_code=result['exit_code'])}")
+            lines.append(f"  - {localize('report.artifact', language, artifact=result['artifact'])}")
     lines.extend([
         "",
-        "## Artifact directory",
+        f"## {localize('report.artifact_directory', language)}",
         "",
         f"`{summary['artifact_directory']}`",
         "",
@@ -539,6 +543,7 @@ def execute_manifest(
             results.append(result_for_non_automated(scenario))
     counts = count_statuses(results)
     summary = {
+        "language": detect_language(project_root),
         "verdict": apply_verdict(results),
         "baseline_commit": manifest["baseline"]["commit"],
         "manifest_identity": approved_manifest_identity,
@@ -585,11 +590,11 @@ def main() -> int:
     project = args.project.resolve()
     state = classify_project(project)
     if state.kind != "approved-current":
-        print(json.dumps({
+        emit_json({
             "state": state.kind,
             "reason": state.reason,
             "verdict": "not-run",
-        }, ensure_ascii=False))
+        })
         return 2
     if args.manual_result:
         reports_directory = project / ".assure" / "reports"
@@ -603,25 +608,25 @@ def main() -> int:
                 reports_directory,
             )
         except AssureError as exc:
-            print(json.dumps({
+            emit_json({
                 "state": "manual-update-failed",
                 "reason": str(exc),
                 "verdict": "not-run",
-            }, ensure_ascii=False))
+            })
             return 2
-        print(json.dumps(summary, ensure_ascii=False))
+        emit_json(summary)
         return exit_code_for_verdict(summary["verdict"])
 
     try:
         summary = execute_manifest(project, Path(state.manifest_path))
     except AssureError as exc:
-        print(json.dumps({
+        emit_json({
             "state": "damaged",
             "reason": str(exc),
             "verdict": "not-run",
-        }, ensure_ascii=False))
+        })
         return 2
-    print(json.dumps(summary, ensure_ascii=False))
+    emit_json(summary)
     return exit_code_for_verdict(summary["verdict"])
 
 
