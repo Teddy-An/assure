@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -28,26 +29,32 @@ def load_hashes(path: Path) -> dict[str, str]:
 
 
 def run_adapter(adapter: Path, project_root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    command = [str(adapter), "--project", str(project_root)]
+    if adapter.suffix.lower() == ".py":
+        command.insert(0, sys.executable)
     try:
         result = subprocess.run(
-            [str(adapter), "--project", str(project_root)],
+            command,
             cwd=project_root,
-            text=True,
-            encoding="utf-8",
-            errors="strict",
             capture_output=True,
+            timeout=15,
         )
     except OSError as exc:
         return [], [{"adapter": adapter.name, "reason": str(exc) or type(exc).__name__}]
+    except subprocess.TimeoutExpired:
+        return [], [{"adapter": adapter.name, "reason": "timed out after 15 seconds"}]
+    try:
+        stdout = result.stdout.decode("utf-8")
     except UnicodeDecodeError:
         return [], [{"adapter": adapter.name, "reason": "invalid JSON: adapter output is not UTF-8"}]
     if result.returncode != 0:
         return [], [{
             "adapter": adapter.name,
-            "reason": result.stderr.strip() or f"exit {result.returncode}",
+            "reason": result.stderr.decode("utf-8", errors="replace").strip()
+            or f"exit {result.returncode}",
         }]
     try:
-        payload = json.loads(result.stdout)
+        payload = json.loads(stdout)
     except json.JSONDecodeError as exc:
         return [], [{"adapter": adapter.name, "reason": f"invalid JSON: {exc}"}]
     if not isinstance(payload, dict):
@@ -88,7 +95,7 @@ def collect_inventory(project_root: Path) -> dict[str, Any]:
     adapters_dir = assure / "adapters"
     if adapters_dir.exists():
         for adapter in sorted(path for path in adapters_dir.iterdir() if path.is_file()):
-            if not os.access(adapter, os.X_OK):
+            if adapter.suffix.lower() != ".py" and not os.access(adapter, os.X_OK):
                 adapter_failures.append({"adapter": adapter.name, "reason": "not executable"})
                 continue
             items, failures = run_adapter(adapter, root)

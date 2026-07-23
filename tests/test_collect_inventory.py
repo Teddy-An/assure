@@ -1,6 +1,5 @@
 import json
 import os
-import stat
 import subprocess
 import sys
 import tempfile
@@ -56,7 +55,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(result["changed_files"], [])
         self.assertEqual(result["unchanged_files"], ["app.py"])
 
-    def test_executable_adapter_receives_absolute_project_and_preserves_its_output(self):
+    def test_python_adapter_runs_without_an_executable_bit(self):
         root = self.make_root()
         adapters = root / ".assure" / "adapters"
         adapters.mkdir(parents=True)
@@ -70,7 +69,6 @@ class InventoryTests(unittest.TestCase):
             "'failures': [{'reason': 'partial discovery'}]}))\n",
             encoding="utf-8",
         )
-        adapter.chmod(adapter.stat().st_mode | stat.S_IXUSR)
         original_adapter = adapter.read_text(encoding="utf-8")
 
         result = collect_inventory(root)
@@ -86,7 +84,6 @@ class InventoryTests(unittest.TestCase):
         adapters.mkdir(parents=True)
         adapter = adapters / "invalid_adapter"
         adapter.write_text("this is not an executable script\n", encoding="utf-8")
-        adapter.chmod(adapter.stat().st_mode | stat.S_IXUSR)
 
         try:
             result = collect_inventory(root)
@@ -111,7 +108,6 @@ class InventoryTests(unittest.TestCase):
             "sys.stdout.buffer.write(b'\\xff')\n",
             encoding="utf-8",
         )
-        adapter.chmod(adapter.stat().st_mode | stat.S_IXUSR)
 
         try:
             result = collect_inventory(root)
@@ -132,18 +128,22 @@ class InventoryTests(unittest.TestCase):
         result = subprocess.run(
             [
                 sys.executable,
+                "-X",
+                "utf8",
                 "-S",
                 "scripts/collect_inventory.py",
                 "--project",
                 str(root),
             ],
             cwd=repository,
-            text=True,
             capture_output=True,
         )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["candidate_count"], 1)
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+        self.assertEqual(
+            json.loads(result.stdout.decode("utf-8"))["candidate_count"],
+            1,
+        )
 
 
 if __name__ == "__main__":

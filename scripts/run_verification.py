@@ -134,13 +134,19 @@ def run_automated(
             log_handle.write(f"$ {command}\n")
             log_handle.flush()
             # shell=True is limited to commands in a human-approved manifest.
-            process = subprocess.run(
-                command,
-                cwd=project_root,
-                shell=True,
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-            )
+            try:
+                process = subprocess.run(
+                    command,
+                    cwd=project_root,
+                    shell=True,
+                    stdout=log_handle,
+                    stderr=subprocess.STDOUT,
+                    timeout=15,
+                )
+            except subprocess.TimeoutExpired:
+                log_handle.write("command timed out after 15 seconds\n")
+                exit_code = 124
+                continue
             if process.returncode != 0:
                 exit_code = process.returncode
     duration = round(time.monotonic() - started, 3)

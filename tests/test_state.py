@@ -2,11 +2,21 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from scripts.assure_common import AssureError, run_text
 from scripts.assure_state import classify_project
 
 
 class ProjectStateTests(unittest.TestCase):
+    def test_run_text_converts_a_timeout_to_assure_error(self):
+        with patch(
+            "scripts.assure_common.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["git"], 0.01),
+        ):
+            with self.assertRaisesRegex(AssureError, "timed out"):
+                run_text(["git", "rev-parse", "HEAD"], Path.cwd(), 0.01)
+
     def make_repo(self) -> Path:
         root = Path(tempfile.mkdtemp())
         subprocess.run(["git", "init", "-q", str(root)], check=True)

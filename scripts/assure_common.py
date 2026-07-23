@@ -10,8 +10,23 @@ class AssureError(RuntimeError):
     pass
 
 
-def run_text(command: list[str], cwd: Path) -> str:
-    result = subprocess.run(command, cwd=cwd, text=True, capture_output=True)
+def run_text(
+    command: list[str],
+    cwd: Path,
+    timeout_seconds: float = 15,
+) -> str:
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AssureError(
+            f"command timed out after {timeout_seconds} seconds"
+        ) from exc
     if result.returncode != 0:
         raise AssureError(result.stderr.strip() or "command failed")
     return result.stdout.strip()
@@ -22,20 +37,28 @@ def git_head(project_root: Path) -> str:
 
 
 def source_changed_since(project_root: Path, baseline_commit: str) -> bool:
-    committed = subprocess.run(
-        [
-            "git", "diff", "--quiet", baseline_commit, "HEAD", "--", ".",
-            ":(exclude).assure",
-        ],
-        cwd=project_root,
-    )
+    try:
+        committed = subprocess.run(
+            [
+                "git", "diff", "--quiet", baseline_commit, "HEAD", "--", ".",
+                ":(exclude).assure",
+            ],
+            cwd=project_root,
+            timeout=15,
+        )
+        working = subprocess.run(
+            [
+                "git", "status", "--porcelain=v1", "-z",
+                "--untracked-files=all", "--", ".",
+            ],
+            cwd=project_root,
+            capture_output=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AssureError("Git command timed out after 15 seconds") from exc
     if committed.returncode not in {0, 1}:
         raise AssureError("baseline commit cannot be compared")
-    working = subprocess.run(
-        ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."],
-        cwd=project_root,
-        capture_output=True,
-    )
     if working.returncode != 0:
         detail = working.stderr.decode(errors="replace").strip()
         raise AssureError(detail or "working tree cannot be inspected")

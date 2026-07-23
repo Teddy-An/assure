@@ -14,9 +14,16 @@ from scripts.run_verification import execute_manifest, record_manual_result
 
 
 class VerificationRunnerTests(unittest.TestCase):
+    def python_command(self, root: Path, source: str) -> str:
+        commands = root / ".assure" / "test-commands"
+        commands.mkdir(parents=True, exist_ok=True)
+        script = commands / f"command-{len(list(commands.iterdir()))}.py"
+        script.write_text(source, encoding="utf-8")
+        return f'"{sys.executable}" "{script}"'
+
     def make_repo(self) -> tuple[Path, str]:
         root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, root)
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         subprocess.run(
             ["git", "-C", str(root), "config", "user.email", "test@example.com"],
@@ -86,8 +93,9 @@ class VerificationRunnerTests(unittest.TestCase):
     def run_cli(self, root: Path) -> subprocess.CompletedProcess:
         runner = Path(__file__).parents[1] / "scripts" / "run_verification.py"
         return subprocess.run(
-            [sys.executable, str(runner), "--project", str(root)],
+            [sys.executable, "-X", "utf8", str(runner), "--project", str(root)],
             text=True,
+            encoding="utf-8",
             capture_output=True,
         )
 
@@ -100,6 +108,8 @@ class VerificationRunnerTests(unittest.TestCase):
         return subprocess.run(
             [
                 sys.executable,
+                "-X",
+                "utf8",
                 str(runner),
                 "--project",
                 str(root),
@@ -113,6 +123,7 @@ class VerificationRunnerTests(unittest.TestCase):
                 "reviewer",
             ],
             text=True,
+            encoding="utf-8",
             capture_output=True,
         )
 
@@ -157,7 +168,11 @@ class VerificationRunnerTests(unittest.TestCase):
 
     def test_pass_does_not_embed_raw_log_in_summary(self):
         root, commit = self.make_repo()
-        manifest = self.make_manifest(root, commit, "printf 'secret-success-log'")
+        manifest = self.make_manifest(
+            root,
+            commit,
+            self.python_command(root, "print('secret-success-log')\n"),
+        )
 
         result = execute_manifest(root, manifest)
 
@@ -178,7 +193,10 @@ class VerificationRunnerTests(unittest.TestCase):
         manifest = self.make_manifest(
             root,
             commit,
-            "printf 'large-private-log'; exit 1",
+            self.python_command(
+                root,
+                "print('large-private-log')\nraise SystemExit(1)\n",
+            ),
         )
 
         result = execute_manifest(root, manifest)
@@ -280,10 +298,21 @@ class VerificationRunnerTests(unittest.TestCase):
                 "verification": {
                     "mode": "automated",
                     "tests": [
-                        {"runner": "shell", "command": "exit 7"},
                         {
                             "runner": "shell",
-                            "command": "printf ran > .assure/second-check-ran",
+                            "command": self.python_command(
+                                root,
+                                "raise SystemExit(7)\n",
+                            ),
+                        },
+                        {
+                            "runner": "shell",
+                            "command": self.python_command(
+                                root,
+                                "from pathlib import Path\n"
+                                "Path('.assure/second-check-ran').write_text("
+                                "'ran', encoding='utf-8')\n",
+                            ),
                         },
                     ],
                 },
@@ -301,8 +330,13 @@ class VerificationRunnerTests(unittest.TestCase):
         manifest_path = self.make_manifest(
             root,
             commit,
-            "printf '\\n# changed by registered check\\n' "
-            ">> .assure/verification-manifest.yaml",
+            self.python_command(
+                root,
+                "from pathlib import Path\n"
+                "with Path('.assure/verification-manifest.yaml').open("
+                "'a', encoding='utf-8') as handle:\n"
+                "    handle.write('\\n# changed by registered check\\n')\n",
+            ),
         )
         expected_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
 
@@ -328,7 +362,11 @@ class VerificationRunnerTests(unittest.TestCase):
                         "mode": "automated",
                         "tests": [{
                             "runner": "shell",
-                            "command": "touch .assure/must-not-run",
+                            "command": self.python_command(
+                                root,
+                                "from pathlib import Path\n"
+                                "Path('.assure/must-not-run').touch()\n",
+                            ),
                         }],
                     },
                 },
@@ -351,7 +389,11 @@ class VerificationRunnerTests(unittest.TestCase):
 
     def test_cli_returns_zero_with_json_for_releasable_result(self):
         root, commit = self.make_repo()
-        self.make_manifest(root, commit, "printf 'cli-private-log'")
+        self.make_manifest(
+            root,
+            commit,
+            self.python_command(root, "print('cli-private-log')\n"),
+        )
 
         result = self.run_cli(root)
 
@@ -363,7 +405,11 @@ class VerificationRunnerTests(unittest.TestCase):
 
     def test_cli_returns_one_for_blocked_result(self):
         root, commit = self.make_repo()
-        self.make_manifest(root, commit, "exit 1")
+        self.make_manifest(
+            root,
+            commit,
+            self.python_command(root, "raise SystemExit(1)\n"),
+        )
 
         result = self.run_cli(root)
 
@@ -377,7 +423,12 @@ class VerificationRunnerTests(unittest.TestCase):
         self.make_manifest(
             root,
             commit,
-            "printf ran > .assure/stale-command-ran",
+            self.python_command(
+                root,
+                "from pathlib import Path\n"
+                "Path('.assure/stale-command-ran').write_text("
+                "'ran', encoding='utf-8')\n",
+            ),
         )
         (root / "tracked.txt").write_text("changed\n", encoding="utf-8")
         subprocess.run(["git", "-C", str(root), "add", "tracked.txt"], check=True)
@@ -476,7 +527,11 @@ class VerificationRunnerTests(unittest.TestCase):
 
     def test_manual_cli_rejects_cross_project_summary_without_mutation(self):
         project_root, project_commit = self.make_repo()
-        self.make_manifest(project_root, project_commit, "true")
+        self.make_manifest(
+            project_root,
+            project_commit,
+            self.python_command(project_root, "raise SystemExit(0)\n"),
+        )
         other_root, other_commit = self.make_repo()
         other = self.make_manual_summary(other_root, other_commit)
         summary_path = Path(other["summary_path"])
@@ -499,7 +554,7 @@ class VerificationRunnerTests(unittest.TestCase):
         initial = self.make_manual_summary(root, commit)
         summary_path = Path(initial["summary_path"])
         outside = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, outside)
+        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
         outside_report = outside / "outside-report.md"
         outside_report.write_text("must remain unchanged\n", encoding="utf-8")
         payload = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -532,7 +587,10 @@ class VerificationRunnerTests(unittest.TestCase):
                         "mode": "automated",
                         "tests": [{
                             "runner": "shell",
-                            "command": "printf 'slash-artifact-content'",
+                            "command": self.python_command(
+                                root,
+                                "print('slash-artifact-content')\n",
+                            ),
                         }],
                     },
                 },
@@ -544,7 +602,10 @@ class VerificationRunnerTests(unittest.TestCase):
                         "mode": "automated",
                         "tests": [{
                             "runner": "shell",
-                            "command": "printf 'underscore-artifact-content'",
+                            "command": self.python_command(
+                                root,
+                                "print('underscore-artifact-content')\n",
+                            ),
                         }],
                     },
                 },
