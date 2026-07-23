@@ -1,0 +1,4 @@
+interface:
+  display_name: "Assure Verify"
+  short_description: "Run every approved check and judge release readiness"
+  default_prompt: "Use $assure-verify to run the approved full verification baseline."

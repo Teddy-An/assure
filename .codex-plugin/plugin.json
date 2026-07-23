@@ -1,0 +1,33 @@
+{
+  "name": "assure",
+  "version": "0.1.0+codex.20260723085014",
+  "description": "Evidence-based full-project release verification for Codex.",
+  "author": {
+    "name": "s1dev"
+  },
+  "keywords": [
+    "testing",
+    "verification",
+    "release-readiness",
+    "regression"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Assure",
+    "shortDescription": "Map product checks and verify release readiness",
+    "longDescription": "Maintain an approved feature-verification baseline, run every registered check, and report verified, failed, manual, and indeterminate release evidence.",
+    "developerName": "s1dev",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Run Assure for this project.",
+      "Update this project's Assure verification map.",
+      "Run the approved full verification baseline."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

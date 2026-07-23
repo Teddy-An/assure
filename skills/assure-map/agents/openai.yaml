@@ -1,0 +1,4 @@
+interface:
+  display_name: "Assure Map"
+  short_description: "Map product scenarios to trusted verification evidence"
+  default_prompt: "Use $assure-map to create or update this project verification baseline."

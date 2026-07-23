@@ -1,0 +1,475 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import subprocess
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+if __package__:
+    from .assure_common import AssureError, load_manifest, sha256_file, write_json
+    from .assure_state import classify_project
+else:
+    from assure_common import AssureError, load_manifest, sha256_file, write_json
+    from assure_state import classify_project
+
+
+RISKS = {"critical", "high", "normal"}
+MODES = {"automated", "manual", "uncovered", "excluded"}
+
+
+def require_nonempty_string(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise AssureError(f"{field} must be a non-empty string")
+    return value
+
+
+def flatten_scenarios(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    scenarios: list[dict[str, Any]] = []
+    scenario_ids: set[str] = set()
+    for section in manifest["sections"]:
+        if not isinstance(section, dict):
+            raise AssureError("manifest section must be an object")
+        section_id = require_nonempty_string(section.get("id"), "section id")
+        section_name = require_nonempty_string(section.get("name"), "section name")
+        section_scenarios = section.get("scenarios", [])
+        if not isinstance(section_scenarios, list):
+            raise AssureError(f"section scenarios must be a list: {section_id}")
+        for scenario in section_scenarios:
+            if not isinstance(scenario, dict):
+                raise AssureError("manifest scenario must be an object")
+            scenario_id = require_nonempty_string(
+                scenario.get("id"),
+                "scenario id",
+            )
+            if scenario_id in scenario_ids:
+                raise AssureError(f"duplicate scenario id: {scenario_id}")
+            scenario_ids.add(scenario_id)
+            require_nonempty_string(scenario.get("name"), "scenario name")
+            risk = scenario.get("risk")
+            if risk not in RISKS:
+                raise AssureError(f"unsupported scenario risk: {risk}")
+            verification = scenario.get("verification")
+            if not isinstance(verification, dict):
+                raise AssureError(
+                    f"scenario verification must be an object: {scenario_id}"
+                )
+            mode = verification.get("mode")
+            if mode not in MODES:
+                raise AssureError(f"unsupported verification mode: {mode}")
+            if mode == "automated":
+                tests = verification.get("tests")
+                if not isinstance(tests, list) or not tests:
+                    raise AssureError(
+                        "automated scenario requires at least one test: "
+                        f"{scenario_id}"
+                    )
+                for test in tests:
+                    if not isinstance(test, dict):
+                        raise AssureError(
+                            f"automated test must be an object: {scenario_id}"
+                        )
+                    if test.get("runner") != "shell":
+                        raise AssureError(
+                            f"unsupported automated test runner: "
+                            f"{test.get('runner')}"
+                        )
+                    require_nonempty_string(
+                        test.get("command"),
+                        "automated test command",
+                    )
+            item = dict(scenario)
+            item["section_id"] = section_id
+            item["section_name"] = section_name
+            scenarios.append(item)
+    return scenarios
+
+
+def result_for_non_automated(scenario: dict[str, Any]) -> dict[str, Any]:
+    verification = scenario["verification"]
+    mode = verification["mode"]
+    statuses = {"manual": "👁", "uncovered": "?", "excluded": "—"}
+    return {
+        "id": scenario["id"],
+        "name": scenario["name"],
+        "section": scenario["section_name"],
+        "risk": scenario["risk"],
+        "mode": mode,
+        "status": statuses[mode],
+        "instructions": verification.get("instructions", []),
+        "reason": verification.get("reason"),
+    }
+
+
+def safe_artifact_name(scenario_id: str) -> str:
+    safe_prefix = "".join(
+        character
+        if character.isascii()
+        and (character.isalnum() or character in {"-", "_", "."})
+        else "_"
+        for character in scenario_id
+    )[:64].strip("._")
+    if not safe_prefix:
+        safe_prefix = "scenario"
+    digest = hashlib.sha256(scenario_id.encode("utf-8")).hexdigest()
+    return f"{safe_prefix}-{digest}"
+
+
+def run_automated(
+    project_root: Path,
+    scenario: dict[str, Any],
+    artifacts: Path,
+) -> dict[str, Any]:
+    tests = scenario["verification"]["tests"]
+    scenario_artifact = artifacts / f"{safe_artifact_name(scenario['id'])}.log"
+    scenario_artifact.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    exit_code = 0
+    with scenario_artifact.open("w", encoding="utf-8") as log_handle:
+        for test in tests:
+            command = test["command"]
+            log_handle.write(f"$ {command}\n")
+            log_handle.flush()
+            # shell=True is limited to commands in a human-approved manifest.
+            process = subprocess.run(
+                command,
+                cwd=project_root,
+                shell=True,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+            )
+            if process.returncode != 0:
+                exit_code = process.returncode
+    duration = round(time.monotonic() - started, 3)
+    return {
+        "id": scenario["id"],
+        "name": scenario["name"],
+        "section": scenario["section_name"],
+        "risk": scenario["risk"],
+        "mode": "automated",
+        "status": "O" if exit_code == 0 else "X",
+        "exit_code": exit_code,
+        "duration_seconds": duration,
+        "artifact": str(scenario_artifact),
+    }
+
+
+def apply_verdict(results: list[dict[str, Any]]) -> str:
+    priority = 0
+    for result in results:
+        risk = result["risk"]
+        status = result["status"]
+        if risk == "critical" and status in {"X", "👁", "?"}:
+            priority = max(priority, 3)
+        elif risk == "high" and status == "X":
+            priority = max(priority, 3)
+        elif risk == "high" and status in {"👁", "?"}:
+            priority = max(priority, 2)
+        elif risk == "normal" and status in {"X", "👁", "?"}:
+            priority = max(priority, 1)
+    return {
+        0: "releasable",
+        1: "warning",
+        2: "approval-required",
+        3: "blocked",
+    }[priority]
+
+
+def render_report(summary: dict[str, Any]) -> str:
+    counts = summary["counts"]
+    lines = [
+        "# Assure Release Verification",
+        "",
+        f"**Verdict:** {summary['verdict']}",
+        f"**Baseline commit:** `{summary['baseline_commit']}`",
+        f"**Generated at:** {summary['generated_at']}",
+        "",
+        "## Summary",
+        "",
+        f"- O: {counts.get('O', 0)}",
+        f"- X: {counts.get('X', 0)}",
+        f"- 👁: {counts.get('👁', 0)}",
+        f"- ?: {counts.get('?', 0)}",
+        f"- —: {counts.get('—', 0)}",
+        "",
+        "## Blocking and unresolved results",
+        "",
+    ]
+    unresolved = [
+        result
+        for result in summary["results"]
+        if result["status"] in {"X", "👁", "?"}
+    ]
+    if not unresolved:
+        lines.append("- None")
+    for result in unresolved:
+        lines.append(
+            f"- {result['status']} `{result['id']}` — {result['name']} "
+            f"(risk: {result['risk']})"
+        )
+        if result.get("artifact"):
+            lines.append(f"  - artifact: `{result['artifact']}`")
+        for instruction in result.get("instructions", []):
+            lines.append(f"  - manual: {instruction}")
+    lines.extend(["", "## All results", ""])
+    for result in summary["results"]:
+        lines.append(
+            f"- {result['status']} `{result['id']}` — "
+            f"{result['section']} / {result['name']}"
+        )
+        if result.get("mode") == "automated":
+            lines.append(
+                f"  - duration: {result['duration_seconds']}s"
+            )
+            lines.append(f"  - exit code: `{result['exit_code']}`")
+            lines.append(f"  - artifact: `{result['artifact']}`")
+    lines.extend([
+        "",
+        "## Artifact directory",
+        "",
+        f"`{summary['artifact_directory']}`",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def count_statuses(results: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for result in results:
+        status = result["status"]
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def contained_path(path: Path, directory: Path, label: str) -> Path:
+    resolved_directory = directory.resolve()
+    resolved_path = path.resolve()
+    try:
+        resolved_path.relative_to(resolved_directory)
+    except ValueError as exc:
+        raise AssureError(
+            f"{label} must be under {resolved_directory}"
+        ) from exc
+    return resolved_path
+
+
+def manifest_identity(
+    manifest_path: Path,
+    manifest: Optional[dict[str, Any]] = None,
+) -> dict[str, str]:
+    loaded = manifest if manifest is not None else load_manifest(manifest_path)
+    baseline_commit = loaded["baseline"].get("commit")
+    if not isinstance(baseline_commit, str) or not baseline_commit:
+        raise AssureError("manifest baseline commit is missing")
+    return {
+        "baseline_commit": baseline_commit,
+        "manifest_sha256": sha256_file(manifest_path),
+    }
+
+
+def reports_directory_for_summary(summary_path: Path) -> Path:
+    resolved_summary = summary_path.resolve()
+    for parent in resolved_summary.parents:
+        if parent.name == "reports" and parent.parent.name == ".assure":
+            return parent
+    raise AssureError(
+        "summary path must be under a project .assure/reports directory"
+    )
+
+
+def record_manual_result(
+    summary_path: Path,
+    scenario_id: str,
+    response: str,
+    actor: str,
+    reason: Optional[str],
+    reports_directory: Optional[Path] = None,
+) -> dict[str, Any]:
+    response_status = {
+        "confirmed": "O",
+        "failed": "X",
+        "indeterminate": "?",
+        "excluded": "—",
+    }
+    if response not in response_status:
+        raise AssureError(f"unsupported manual response: {response}")
+    if not isinstance(actor, str) or not actor.strip():
+        raise AssureError("manual result requires an actor")
+    if response == "excluded" and not reason:
+        raise AssureError("excluded manual result requires a reason")
+    if reports_directory is None:
+        reports_directory = reports_directory_for_summary(summary_path)
+    resolved_reports = reports_directory.resolve()
+    if (
+        resolved_reports.name != "reports"
+        or resolved_reports.parent.name != ".assure"
+    ):
+        raise AssureError(
+            "reports directory must be a project .assure/reports directory"
+        )
+    summary_path = contained_path(
+        summary_path,
+        resolved_reports,
+        "summary path",
+    )
+    project_root = resolved_reports.parent.parent
+    state = classify_project(project_root)
+    if state.kind != "approved-current":
+        raise AssureError(
+            f"project is not approved-current: {state.kind}"
+        )
+    current_identity = manifest_identity(Path(state.manifest_path))
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AssureError(f"cannot read verification summary: {exc}") from exc
+    if not isinstance(summary, dict) or not isinstance(
+        summary.get("results"),
+        list,
+    ):
+        raise AssureError("verification summary is damaged")
+    if summary.get("manifest_identity") != current_identity:
+        raise AssureError(
+            "verification summary manifest identity does not match "
+            "the current approved manifest"
+        )
+    report_value = summary.get("report")
+    if not isinstance(report_value, str) or not report_value:
+        raise AssureError("verification summary report path is damaged")
+    report_path = Path(report_value)
+    report_path = contained_path(
+        report_path,
+        resolved_reports,
+        "report path",
+    )
+    selected = None
+    for result in summary["results"]:
+        if isinstance(result, dict) and result.get("id") == scenario_id:
+            selected = result
+            break
+    if selected is None:
+        raise AssureError(f"scenario not found in summary: {scenario_id}")
+    if selected.get("mode") != "manual":
+        raise AssureError(f"scenario is not manual: {scenario_id}")
+    selected["status"] = response_status[response]
+    selected["confirmed_by"] = actor
+    selected["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+    if reason:
+        selected["reason"] = reason
+    summary["counts"] = count_statuses(summary["results"])
+    summary["verdict"] = apply_verdict(summary["results"])
+    write_json(summary_path, summary)
+    report_path.write_text(render_report(summary), encoding="utf-8")
+    return summary
+
+
+def execute_manifest(
+    project_root: Path,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    manifest = load_manifest(manifest_path)
+    approved_manifest_identity = manifest_identity(manifest_path, manifest)
+    scenarios = flatten_scenarios(manifest)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    assure_dir = project_root / ".assure"
+    artifacts = assure_dir / "artifacts" / timestamp
+    results: list[dict[str, Any]] = []
+    for scenario in scenarios:
+        mode = scenario["verification"]["mode"]
+        if mode == "automated":
+            results.append(run_automated(project_root, scenario, artifacts))
+        else:
+            results.append(result_for_non_automated(scenario))
+    counts = count_statuses(results)
+    summary = {
+        "verdict": apply_verdict(results),
+        "baseline_commit": manifest["baseline"]["commit"],
+        "manifest_identity": approved_manifest_identity,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "artifact_directory": str(artifacts),
+        "counts": counts,
+        "results": results,
+    }
+    report_path = (
+        assure_dir / "reports" / f"{timestamp}-release-verification.md"
+    )
+    summary_path = (
+        assure_dir / "reports" / f"{timestamp}-release-verification.json"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    summary["report"] = str(report_path)
+    summary["summary_path"] = str(summary_path)
+    report_path.write_text(render_report(summary), encoding="utf-8")
+    write_json(summary_path, summary)
+    return summary
+
+
+def exit_code_for_verdict(verdict: str) -> int:
+    return 1 if verdict in {"blocked", "approval-required"} else 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--project", required=True, type=Path)
+    parser.add_argument("--summary", type=Path)
+    parser.add_argument("--manual-result")
+    parser.add_argument(
+        "--response",
+        choices=["confirmed", "failed", "indeterminate", "excluded"],
+    )
+    parser.add_argument("--actor")
+    parser.add_argument("--reason")
+    args = parser.parse_args()
+    if args.manual_result:
+        if not args.summary or not args.response or not args.actor:
+            parser.error(
+                "--manual-result requires --summary, --response, and --actor"
+            )
+    project = args.project.resolve()
+    state = classify_project(project)
+    if state.kind != "approved-current":
+        print(json.dumps({
+            "state": state.kind,
+            "reason": state.reason,
+            "verdict": "not-run",
+        }, ensure_ascii=False))
+        return 2
+    if args.manual_result:
+        reports_directory = project / ".assure" / "reports"
+        try:
+            summary = record_manual_result(
+                args.summary,
+                args.manual_result,
+                args.response,
+                args.actor,
+                args.reason,
+                reports_directory,
+            )
+        except AssureError as exc:
+            print(json.dumps({
+                "state": "manual-update-failed",
+                "reason": str(exc),
+                "verdict": "not-run",
+            }, ensure_ascii=False))
+            return 2
+        print(json.dumps(summary, ensure_ascii=False))
+        return exit_code_for_verdict(summary["verdict"])
+
+    try:
+        summary = execute_manifest(project, Path(state.manifest_path))
+    except AssureError as exc:
+        print(json.dumps({
+            "state": "damaged",
+            "reason": str(exc),
+            "verdict": "not-run",
+        }, ensure_ascii=False))
+        return 2
+    print(json.dumps(summary, ensure_ascii=False))
+    return exit_code_for_verdict(summary["verdict"])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

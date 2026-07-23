@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "next": "15.0.0",
+    "@nestjs/core": "11.0.0"
+  },
+  "devDependencies": {
+    "jest": "30.0.0",
+    "typescript": "5.9.0"
+  },
+  "scripts": {
+    "test": "jest"
+  }
+}

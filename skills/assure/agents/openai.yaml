@@ -1,0 +1,4 @@
+interface:
+  display_name: "Assure"
+  short_description: "Build trusted evidence and verify release readiness"
+  default_prompt: "Use $assure to prepare and run full release verification."

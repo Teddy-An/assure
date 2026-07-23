@@ -1,0 +1,177 @@
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+from scripts.assure_state import classify_project
+
+
+class ProjectStateTests(unittest.TestCase):
+    def make_repo(self) -> Path:
+        root = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.com"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        (root / "tracked.txt").write_text("v1\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "tracked.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "baseline"], check=True)
+        return root
+
+    def test_absent_when_no_assure_state_exists(self):
+        root = self.make_repo()
+        self.assertEqual(classify_project(root).kind, "absent")
+
+    def test_approved_current_when_commit_matches(self):
+        root = self.make_repo()
+        commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "verification-manifest.yaml").write_text(
+            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(classify_project(root).kind, "approved-current")
+
+    def test_approved_stale_when_commit_differs(self):
+        root = self.make_repo()
+        baseline_commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        (root / "tracked.txt").write_text("v2\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "tracked.txt"], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "source change"], check=True)
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "verification-manifest.yaml").write_text(
+            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {baseline_commit}\nsections: []\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(classify_project(root).kind, "approved-stale")
+
+    def test_approved_stale_when_working_tree_product_changes(self):
+        root = self.make_repo()
+        commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "verification-manifest.yaml").write_text(
+            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
+            encoding="utf-8",
+        )
+        (root / "tracked.txt").write_text("v2\n", encoding="utf-8")
+        self.assertEqual(classify_project(root).kind, "approved-stale")
+
+    def test_assure_only_changes_do_not_make_product_source_stale(self):
+        root = self.make_repo()
+        commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "verification-manifest.yaml").write_text(
+            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
+            encoding="utf-8",
+        )
+        (assure / "notes.txt").write_text("local result\n", encoding="utf-8")
+        self.assertEqual(classify_project(root).kind, "approved-current")
+
+    def test_approved_stale_when_assure_file_is_renamed_to_product_source(self):
+        root = self.make_repo()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "source.txt").write_text("internal\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(root), "add", ".assure/source.txt"], check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "commit", "-qm", "add assure source"], check=True
+        )
+        commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        (assure / "verification-manifest.yaml").write_text(
+            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "mv", ".assure/source.txt", "product.txt"],
+            check=True,
+        )
+        self.assertEqual(classify_project(root).kind, "approved-stale")
+
+    def test_approved_current_when_assure_file_is_renamed_within_assure(self):
+        root = self.make_repo()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "source.txt").write_text("internal\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(root), "add", ".assure/source.txt"], check=True
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "commit", "-qm", "add assure source"], check=True
+        )
+        commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        (assure / "verification-manifest.yaml").write_text(
+            f"schema_version: 1\nbaseline:\n  status: approved\n  commit: {commit}\nsections: []\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "mv", ".assure/source.txt", ".assure/renamed.txt"],
+            check=True,
+        )
+        self.assertEqual(classify_project(root).kind, "approved-current")
+
+    def test_incomplete_when_manifest_is_missing(self):
+        root = self.make_repo()
+        (root / ".assure").mkdir()
+        self.assertEqual(classify_project(root).kind, "incomplete")
+
+    def test_damaged_when_manifest_is_invalid(self):
+        root = self.make_repo()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "verification-manifest.yaml").write_text(
+            "schema_version: [\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(classify_project(root).kind, "damaged")
+
+    def test_draft_manifest_returns_draft(self):
+        root = self.make_repo()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "verification-manifest.yaml").write_text(
+            "schema_version: 1\nbaseline:\n  status: draft\nsections: []\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(classify_project(root).kind, "draft")
+
+    def test_review_manifest_returns_review(self):
+        root = self.make_repo()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "verification-manifest.yaml").write_text(
+            "schema_version: 1\nbaseline:\n  status: review\nsections: []\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(classify_project(root).kind, "review")
+
+    def test_damaged_when_baseline_commit_does_not_exist(self):
+        root = self.make_repo()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "verification-manifest.yaml").write_text(
+            "schema_version: 1\nbaseline:\n  status: approved\n"
+            "  commit: 0000000000000000000000000000000000000000\nsections: []\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(classify_project(root).kind, "damaged")
+
+
+if __name__ == "__main__":
+    unittest.main()
