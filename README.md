@@ -18,15 +18,31 @@ that every product feature and user scenario is represented, that the
 verification baseline still matches the current code, or that unanswered
 manual checks were handled explicitly.
 
-Assure builds and maintains an approved verification baseline, runs the full
-registered population, and reports release readiness from bounded evidence.
+Assure builds and approves a source-snapshot verification baseline, runs the
+full registered population in an isolated network-disabled sandbox, and
+reports release readiness from bounded evidence without routine prompts.
+
+## Autonomous and safe by default
+
+One request performs discovery, test mapping, safe test generation, snapshot
+approval, and verification. Manual checks and missing capabilities are
+reported in the final result instead of interrupting the run.
+
+Automated checks run only in an independent temporary copy through Docker or
+Podman with networking disabled. Project mocks take priority; Assure injects
+additional guards for fetch, WebSocket, HTTP/HTTPS, and supported Firebase
+boundaries. If a safe sandbox is unavailable, Assure returns
+`sandbox-unavailable` and never falls back to the original working tree.
+
+Human-facing output follows `.assure/config.yaml` `language: ko|en`; without
+an override, Korean locales use Korean and other locales use English.
 
 ## What makes it different
 
 - Discovers product structures before asking the model to inspect source.
 - Organizes verification by feature and user scenario.
 - Maps existing tests before proposing new coverage.
-- Requires explicit human approval for the baseline.
+- Approves a deterministic source snapshot automatically.
 - Detects when an approved baseline is stale or damaged.
 - Separates passed, failed, manual, indeterminate, and excluded results.
 - Keeps model context bounded by using deterministic scripts and JSON
@@ -121,8 +137,8 @@ Update this project's Assure verification map.
 Run the approved full verification baseline.
 ```
 
-Mapping always stops for explicit human approval before an approved baseline
-can be verified.
+Mapping continues directly to isolated verification. Routine approval and
+test-selection questions are not required.
 
 ## Project state
 

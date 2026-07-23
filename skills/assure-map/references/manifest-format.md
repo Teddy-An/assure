@@ -21,8 +21,8 @@ Automated verification requires:
 ```yaml
 mode: automated
 tests:
-  - runner: shell
-    command: pnpm test -- tests/auth/login.spec.ts
+  - runner: vitest
+    args: [run, tests/auth/login.spec.ts]
     selector: valid credentials return access token
 ```
 
@@ -34,7 +34,7 @@ verification has no additional fields.
 
 An adapter under `.assure/adapters/` must:
 
-- be executable and accept `--project <absolute-project-root>`;
+- be a Python file or executable and accept `--project <absolute-project-root>`;
 - treat the project working directory and product source as read-only;
 - exit `0` and write one UTF-8 JSON object to stdout;
 - include `items` and `failures` arrays in that object.
@@ -60,8 +60,8 @@ sections:
         verification:
           mode: automated
           tests:
-            - runner: shell
-              command: pnpm test -- tests/auth/login.spec.ts
+            - runner: vitest
+              args: [run, tests/auth/login.spec.ts]
               selector: valid credentials return access token
       - id: auth.logout
         name: 로그아웃

@@ -40,9 +40,8 @@ discovery; continue only after `<python-command>` is selected.
 
 1. Run
    `<python-command> <assure-root>/scripts/assure_state.py --project <root>`.
-2. Parse the state command's stdout JSON. Continue only for
-   `approved-current`. For every other state, stop and direct the user to
-   `$assure:assure-map`.
+2. Parse the state JSON. Continue for `approved-current`; otherwise route
+   automatically to `$assure:assure-map` and resume verification afterward.
 3. Run
    `<python-command> <assure-root>/scripts/run_verification.py --project <root>` once.
    Do not execute scenario commands individually from the conversation.
@@ -55,7 +54,8 @@ discovery; continue only after `<python-command>` is selected.
 6. Present the verdict first, then baseline commit and project root, status
    counts, blocking or unresolved scenario IDs, manual checks, and the Markdown
    report path.
-7. For each manual check, accept only an explicit `confirmed`, `failed`,
+7. Manual checks never pause the initial run. Report them together as pending.
+   When the user later responds, accept only an explicit `confirmed`, `failed`,
    `indeterminate`, or `excluded` response. Require an actor for every response,
    and require a reason for `excluded`; for that response, `--actor` identifies
    the approver. Do not infer confirmation.

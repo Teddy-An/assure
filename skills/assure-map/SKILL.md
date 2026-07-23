@@ -41,11 +41,10 @@ discovery; continue only after `<python-command>` is selected.
 2. For absent or incomplete state, run
    `<python-command> <assure-root>/scripts/detect_environment.py --project <root>` before
    reading source files.
-3. Show detected stack, default exclusions, unsupported structures, whether
-   this is a full or incremental scan, and a bounded scan estimate.
-4. Before creating or changing any project collector under `.assure/adapters/`,
-   show its purpose and estimated scope, then ask for approval. Generated
-   adapters must be read-only and emit the contract in the manifest reference.
+3. Record detected stack, exclusions, unsupported structures, scan kind, and
+   bounded estimate for the final report. Continue automatically.
+4. Create only read-only project collectors when deterministic discovery
+   requires one. Record their purpose and scope in the final report.
 5. Run `<python-command> <assure-root>/scripts/collect_inventory.py --project <root>`.
 6. Report candidate, changed, unchanged, and deleted counts, every adapter
    failure, and every excluded dynamic structure. Unresolved
@@ -56,17 +55,19 @@ discovery; continue only after `<python-command>` is selected.
    for high-risk behavior.
 9. Map existing tests before proposing new tests. Record the test command and
    selector that prove each mapping.
-10. For one uncovered scenario, ask whether to add its test. For multiple
-    scenarios, show a numbered list plus `all` and `skip`.
-11. For selected tests, follow the project's existing test conventions. For
+10. Add tests for every safely automatable uncovered scenario without asking.
+    Follow the project's existing conventions and never change production code.
+11. For generated tests, follow the project's existing test conventions. For
     existing behavior, prove test sensitivity with a controlled mutation in an
     isolated workspace and restore it.
 12. If a test reveals an existing defect, report it. Do not fix production code
     without a separate user request.
-13. Present added, changed, deleted, uncovered, manual, and excluded scenarios
-    with risk levels.
-14. Write baseline status `review`. Change it to `approved` and record the
-    current Git commit only after explicit human approval.
+13. Record added, changed, deleted, uncovered, manual, and excluded scenarios
+   with risk levels for the final report.
+14. Write baseline status `approved`, record the current Git commit as
+   provenance, and record the deterministic `source_snapshot`. Continue
+   directly to verification. A matching snapshot is current even when files
+   are uncommitted.
 
 Read `references/manifest-format.md` before creating or editing the manifest.
 
@@ -74,8 +75,8 @@ Read `references/manifest-format.md` before creating or editing the manifest.
 
 - Reading the whole repository before deterministic discovery
 - Treating an adapter failure as a harmless warning
-- Generating all missing tests without selection
+- Modifying production code to make a generated test pass
 - Calling a draft or partial list complete
-- Approving the baseline on the user's behalf
+- Pausing for routine approval instead of returning a result
 
 Any red flag means stop and return to the relevant workflow step.

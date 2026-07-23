@@ -15,22 +15,28 @@ from typing import Any, Optional
 
 if __package__:
     from .assure_common import AssureError, load_manifest, sha256_file, write_json
+    from .assure_mocks import inject_mocks
     from .assure_output import detect_language, emit_json, localize
+    from .assure_runners import build_runner_command
+    from .assure_sandbox import Sandbox, SandboxUnavailable, prepare_sandbox
     from .assure_state import classify_project
 else:
     from assure_common import AssureError, load_manifest, sha256_file, write_json
+    from assure_mocks import inject_mocks
     from assure_output import detect_language, emit_json, localize
+    from assure_runners import build_runner_command
+    from assure_sandbox import Sandbox, SandboxUnavailable, prepare_sandbox
     from assure_state import classify_project
 
 
 RISKS = {"critical", "high", "normal"}
 MODES = {"automated", "manual", "uncovered", "excluded"}
 AUTOMATED_TIMEOUT_SECONDS = 15
-_WINDOWS_SHELL_SUPERVISOR = (
+_WINDOWS_COMMAND_SUPERVISOR = (
     "import subprocess, sys\n"
     "if sys.stdin.buffer.read(1) != b'1':\n"
     "    raise SystemExit(125)\n"
-    "raise SystemExit(subprocess.call(sys.argv[1], shell=True))\n"
+    "raise SystemExit(subprocess.call(sys.argv[1:]))\n"
 )
 
 
@@ -116,7 +122,7 @@ def _create_windows_job() -> Any:
 
 
 def _start_automated_process(
-    command: str,
+    command: list[str],
     project_root: Path,
     log_handle: Any,
 ) -> tuple[subprocess.Popen[Any], Any]:
@@ -125,7 +131,7 @@ def _start_automated_process(
             subprocess.Popen(
                 command,
                 cwd=project_root,
-                shell=True,
+                shell=False,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -135,7 +141,7 @@ def _start_automated_process(
 
     job = _create_windows_job()
     process = subprocess.Popen(
-        [sys.executable, "-c", _WINDOWS_SHELL_SUPERVISOR, command],
+        [sys.executable, "-c", _WINDOWS_COMMAND_SUPERVISOR, *command],
         cwd=project_root,
         stdin=subprocess.PIPE,
         stdout=log_handle,
@@ -218,15 +224,7 @@ def flatten_scenarios(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                         raise AssureError(
                             f"automated test must be an object: {scenario_id}"
                         )
-                    if test.get("runner") != "shell":
-                        raise AssureError(
-                            f"unsupported automated test runner: "
-                            f"{test.get('runner')}"
-                        )
-                    require_nonempty_string(
-                        test.get("command"),
-                        "automated test command",
-                    )
+                    build_runner_command(test, Path.cwd())
             item = dict(scenario)
             item["section_id"] = section_id
             item["section_name"] = section_name
@@ -268,6 +266,7 @@ def run_automated(
     project_root: Path,
     scenario: dict[str, Any],
     artifacts: Path,
+    sandbox: Sandbox,
 ) -> dict[str, Any]:
     tests = scenario["verification"]["tests"]
     scenario_artifact = artifacts / f"{safe_artifact_name(scenario['id'])}.log"
@@ -276,13 +275,14 @@ def run_automated(
     exit_code = 0
     with scenario_artifact.open("w", encoding="utf-8") as log_handle:
         for test in tests:
-            command = test["command"]
-            log_handle.write(f"$ {command}\n")
+            runner_command = build_runner_command(test, project_root)
+            command = sandbox.wrap(runner_command.argv(), test["runner"])
+            log_handle.write(f"$ {' '.join(command)}\n")
             log_handle.flush()
             # shell=True is limited to commands in a human-approved manifest.
             process, job = _start_automated_process(
                 command,
-                project_root,
+                sandbox.root,
                 log_handle,
             )
             try:
@@ -535,12 +535,42 @@ def execute_manifest(
     assure_dir = project_root / ".assure"
     artifacts = assure_dir / "artifacts" / timestamp
     results: list[dict[str, Any]] = []
-    for scenario in scenarios:
-        mode = scenario["verification"]["mode"]
-        if mode == "automated":
-            results.append(run_automated(project_root, scenario, artifacts))
-        else:
-            results.append(result_for_non_automated(scenario))
+    sandbox = None
+    mock_result = None
+    automated = any(item["verification"]["mode"] == "automated" for item in scenarios)
+    if automated:
+        try:
+            sandbox = prepare_sandbox(project_root)
+            framework = next(
+                test["runner"]
+                for item in scenarios
+                if item["verification"]["mode"] == "automated"
+                for test in item["verification"]["tests"]
+            )
+            mock_result = inject_mocks(sandbox.root, framework)
+        except SandboxUnavailable as exc:
+            for scenario in scenarios:
+                if scenario["verification"]["mode"] == "automated":
+                    item = result_for_non_automated({
+                        **scenario,
+                        "verification": {"mode": "uncovered"},
+                    })
+                    item["reason"] = str(exc)
+                    item["status"] = "?"
+                    results.append(item)
+                else:
+                    results.append(result_for_non_automated(scenario))
+    if not results:
+        try:
+            for scenario in scenarios:
+                mode = scenario["verification"]["mode"]
+                if mode == "automated":
+                    results.append(run_automated(project_root, scenario, artifacts, sandbox))
+                else:
+                    results.append(result_for_non_automated(scenario))
+        finally:
+            if sandbox is not None:
+                sandbox.cleanup()
     counts = count_statuses(results)
     summary = {
         "language": detect_language(project_root),
@@ -551,6 +581,15 @@ def execute_manifest(
         "artifact_directory": str(artifacts),
         "counts": counts,
         "results": results,
+        "sandbox": {
+            "provider": sandbox.provider if sandbox else None,
+            "network": sandbox.network if sandbox else "not-run",
+        },
+        "automatic_mocks": {
+            "injected": mock_result.injected if mock_result else [],
+            "conflicts": mock_result.conflicts if mock_result else [],
+            "unverifiable": mock_result.unverifiable if mock_result else [],
+        },
     }
     report_path = (
         assure_dir / "reports" / f"{timestamp}-release-verification.md"
