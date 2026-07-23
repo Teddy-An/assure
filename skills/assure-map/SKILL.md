@@ -19,16 +19,34 @@ developer, and user instructions still take precedence.
 
 Resolve `<assure-root>` as the directory two levels above this `SKILL.md`.
 
-1. Run `python3 <assure-root>/scripts/assure_state.py --project <root>`.
+## Python runtime
+
+Before running any script under `<assure-root>/scripts`, discover a supported
+Python runtime in this exact order:
+
+1. `python3 --version`
+2. `python --version`
+3. `py -3 --version`
+
+Select the first command that reports Python 3.9 or newer and retain it as
+`<python-command>` for the entire workflow. Python 2 and Python 3.8 or older
+are unsupported.
+
+If none is available, tell the user that Python 3.9 or newer is required and
+ask whether to install it. Do not install Python or change the environment
+without explicit user approval. After an approved installation, rerun runtime
+discovery; continue only after `<python-command>` is selected.
+
+1. Run `<python-command> <assure-root>/scripts/assure_state.py --project <root>`.
 2. For absent or incomplete state, run
-   `python3 <assure-root>/scripts/detect_environment.py --project <root>` before
+   `<python-command> <assure-root>/scripts/detect_environment.py --project <root>` before
    reading source files.
 3. Show detected stack, default exclusions, unsupported structures, whether
    this is a full or incremental scan, and a bounded scan estimate.
 4. Before creating or changing any project collector under `.assure/adapters/`,
    show its purpose and estimated scope, then ask for approval. Generated
    adapters must be read-only and emit the contract in the manifest reference.
-5. Run `python3 <assure-root>/scripts/collect_inventory.py --project <root>`.
+5. Run `<python-command> <assure-root>/scripts/collect_inventory.py --project <root>`.
 6. Report candidate, changed, unchanged, and deleted counts, every adapter
    failure, and every excluded dynamic structure. Unresolved
    scope prevents an `approved` baseline.
