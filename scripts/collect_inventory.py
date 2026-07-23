@@ -11,9 +11,11 @@ from typing import Any
 if __package__:
     from .assure_common import sha256_file, write_json
     from .detect_environment import EXCLUDED_DIRECTORIES, detect_environment
+    from .assure_output import emit_json
 else:
     from assure_common import sha256_file, write_json
     from detect_environment import EXCLUDED_DIRECTORIES, detect_environment
+    from assure_output import emit_json
 
 
 CANDIDATE_SUFFIXES = {
@@ -121,14 +123,14 @@ def main() -> int:
     parser.add_argument("--project", required=True, type=Path)
     args = parser.parse_args()
     result = collect_inventory(args.project)
-    print(json.dumps({
+    emit_json({
         "candidate_count": len(result["candidate_files"]),
         "changed_count": len(result["changed_files"]),
         "unchanged_count": len(result["unchanged_files"]),
         "deleted_count": len(result["deleted_files"]),
         "adapter_failure_count": len(result["adapter_failures"]),
         "index": str(args.project.resolve() / ".assure" / "discovery-index.json"),
-    }, ensure_ascii=False))
+    })
     return 2 if result["adapter_failures"] else 0
 
 

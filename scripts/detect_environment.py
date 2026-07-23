@@ -6,6 +6,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+if __package__:
+    from .assure_output import emit_json
+else:
+    from assure_output import emit_json
+
 
 EXCLUDED_DIRECTORIES = [
     ".git",
@@ -126,7 +131,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True, type=Path)
     args = parser.parse_args()
-    print(json.dumps(detect_environment(args.project), ensure_ascii=False, indent=2))
+    emit_json(detect_environment(args.project))
     return 0
 
 

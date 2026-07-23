@@ -43,6 +43,9 @@ class OutputTests(unittest.TestCase):
     def test_localize_interpolates_english_values(self):
         self.assertEqual(localize("report.verdict", "en", verdict="blocked"), "Verdict: blocked")
 
+    def test_localize_returns_korean_catalog_message(self):
+        self.assertEqual(localize("verdict.blocked", "ko"), "차단됨")
+
 
 if __name__ == "__main__":
     unittest.main()

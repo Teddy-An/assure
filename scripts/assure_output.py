@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import locale
+import re
 import sys
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 
 MESSAGES = {
@@ -55,11 +54,12 @@ def detect_language(project_root: Path) -> str:
     config_path = project_root / ".assure" / "config.yaml"
     if config_path.exists():
         try:
-            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
-            config = None
-        if isinstance(config, dict) and config.get("language") in MESSAGES:
-            return config["language"]
+            config = config_path.read_text(encoding="utf-8")
+        except OSError:
+            config = ""
+        match = re.search(r"(?m)^\s*language\s*:\s*['\"]?(en|ko)\b", config)
+        if match:
+            return match.group(1)
     language, _ = locale.getlocale()
     return "ko" if language and language.lower().startswith("ko") else "en"
 
