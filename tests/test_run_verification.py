@@ -221,8 +221,8 @@ class VerificationRunnerTests(unittest.TestCase):
         self.assertIn("secret-success-log", artifact.read_text(encoding="utf-8"))
         report = Path(result["report"]).read_text(encoding="utf-8")
         saved_summary = Path(result["summary_path"]).read_text(encoding="utf-8")
-        self.assertIn("- duration: ", report)
-        self.assertIn("- exit code: `0`", report)
+        self.assertIn("| Status | Risk | Section | ID |", report)
+        self.assertIn("passed<br>exit code: `0`<br>", report)
         self.assertNotIn("secret-success-log", report)
         self.assertNotIn("secret-success-log", saved_summary)
 
@@ -551,7 +551,7 @@ class VerificationRunnerTests(unittest.TestCase):
         saved = json.loads(summary_path.read_text(encoding="utf-8"))
         self.assertEqual(saved["results"][0]["confirmed_by"], "reviewer")
         self.assertIn(
-            "**Verdict: releasable**",
+            "| Verdict | releasable (`releasable`) |",
             Path(initial["report"]).read_text(encoding="utf-8"),
         )
 

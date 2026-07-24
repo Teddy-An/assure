@@ -3,47 +3,25 @@ from pathlib import Path
 
 
 README = Path(__file__).resolve().parents[1] / "README.md"
+README_EN = Path(__file__).resolve().parents[1] / "README.en.md"
 
 
 class ReadmeTests(unittest.TestCase):
-    def test_readme_has_matching_english_and_korean_sections(self):
-        text = README.read_text(encoding="utf-8")
-        english, korean = text.split('<a id="한국어"></a>', maxsplit=1)
-
-        english_headings = [
-            "## Why Assure",
-            "## What makes it different",
-            "## How it works",
-            "## Requirements",
-            "## Local installation",
-            "## Quick start",
-            "## Project state",
-            "## Verdicts and safety boundaries",
-            "## Limitations",
-            "## Development",
-            "## License",
-        ]
-        korean_headings = [
-            "## 왜 Assure인가",
-            "## 무엇이 다른가",
-            "## 작동 방식",
-            "## 요구 사항",
-            "## 로컬 설치",
-            "## 빠른 시작",
-            "## 프로젝트 상태",
-            "## 판정과 안전 경계",
-            "## 제한 사항",
-            "## 개발",
-            "## 라이선스",
-        ]
-
-        for heading in english_headings:
-            self.assertIn(heading, english)
-        for heading in korean_headings:
-            self.assertIn(heading, korean)
+    def test_readmes_are_split_by_language_and_cross_linked(self):
+        korean = README.read_text(encoding="utf-8")
+        english = README_EN.read_text(encoding="utf-8")
+        self.assertIn("[English](README.en.md)", korean)
+        self.assertIn("[한국어](README.md)", english)
+        self.assertIn("## 왜 Assure가 필요한가", korean)
+        self.assertIn("## 무엇이 다른가", korean)
+        self.assertIn("## Why use Assure?", english)
+        self.assertIn("## What makes it different?", english)
 
     def test_readme_documents_verified_install_and_usage_contract(self):
-        text = README.read_text(encoding="utf-8")
+        text = (
+            README.read_text(encoding="utf-8")
+            + README_EN.read_text(encoding="utf-8")
+        )
         required = [
             "Early beta",
             "codex plugin marketplace add",
@@ -61,6 +39,7 @@ class ReadmeTests(unittest.TestCase):
 
     def test_readme_is_read_as_utf8(self):
         self.assertIn("Assure", README.read_text(encoding="utf-8"))
+        self.assertIn("Assure", README_EN.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

@@ -51,9 +51,14 @@ discovery; continue only after `<python-command>` is selected.
 5. Never open files under `.assure/artifacts/` or any artifact, report, or
    summary path returned by the JSON. Artifact paths are identifiers to report,
    not files to read.
-6. Present the verdict first, then baseline commit and project root, status
-   counts, blocking or unresolved scenario IDs, manual checks, and the Markdown
-   report path.
+6. Present the verdict first. Then use Markdown tables for:
+   - baseline commit, project root, execution provider, and report path;
+   - status counts for `O`, `X`, `👁`, `?`, and `—`;
+   - every scenario with status, risk, section, ID, name, mode, and a compact
+     result or reason.
+   Put blocking and unresolved rows before the complete result table. Keep
+   manual instructions in the result/reason cell with `<br>` separators.
+   Do not replace the complete table with prose or a partial bullet list.
 7. Manual checks never pause the initial run. Report them together as pending.
    When the user later responds, accept only an explicit `confirmed`, `failed`,
    `indeterminate`, or `excluded` response. Require an actor for every response,

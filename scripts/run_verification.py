@@ -338,6 +338,67 @@ def apply_verdict(results: list[dict[str, Any]]) -> str:
     }[priority]
 
 
+def _markdown_cell(value: Any) -> str:
+    if value is None:
+        return "—"
+    text = str(value).replace("|", "\\|")
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+
+
+def _result_detail(result: dict[str, Any], language: str) -> str:
+    details: list[str] = []
+    if result.get("mode") == "automated":
+        if result["status"] == "O":
+            details.append(localize("report.passed", language))
+        else:
+            details.append(localize("report.failed", language))
+        if result.get("exit_code") is not None:
+            details.append(
+                localize(
+                    "report.exit_code",
+                    language,
+                    exit_code=str(result["exit_code"]),
+                )
+            )
+        if result.get("duration_seconds") is not None:
+            details.append(f"{result['duration_seconds']}s")
+    if result.get("reason"):
+        details.append(str(result["reason"]))
+    details.extend(str(item) for item in result.get("instructions", []))
+    return "<br>".join(
+        item.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+        for item in details
+    ) or "—"
+
+
+def _result_table(results: list[dict[str, Any]], language: str) -> list[str]:
+    headings = [
+        localize("report.status", language),
+        localize("report.risk", language),
+        localize("report.section", language),
+        localize("report.id", language),
+        localize("report.scenario", language),
+        localize("report.mode", language),
+        localize("report.result_detail", language),
+    ]
+    lines = [
+        "| " + " | ".join(headings) + " |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for result in results:
+        values = [
+            result["status"],
+            result["risk"],
+            result["section"],
+            f"`{result['id']}`",
+            result["name"],
+            result["mode"],
+            _result_detail(result, language),
+        ]
+        lines.append("| " + " | ".join(_markdown_cell(item) for item in values) + " |")
+    return lines
+
+
 def render_report(summary: dict[str, Any]) -> str:
     counts = summary["counts"]
     language = summary.get("language", "en")
@@ -345,17 +406,23 @@ def render_report(summary: dict[str, Any]) -> str:
     lines = [
         f"# {localize('report.title', language)}",
         "",
-        f"**{localize('report.verdict', language, verdict=verdict)}**",
-        f"**{localize('report.baseline_commit', language, commit=summary['baseline_commit'])}**",
-        f"**{localize('report.generated_at', language, timestamp=summary['generated_at'])}**",
+        f"| {localize('report.field', language)} | {localize('report.value', language)} |",
+        "|---|---|",
+        f"| {localize('report.verdict_label', language)} | {verdict} (`{summary['verdict']}`) |",
+        f"| {localize('report.baseline_commit_label', language)} | `{summary['baseline_commit']}` |",
+        f"| {localize('report.generated_at_label', language)} | {summary['generated_at']} |",
+        f"| {localize('report.provider', language)} | {_markdown_cell(summary['sandbox'].get('provider'))} |",
+        f"| {localize('report.network', language)} | {_markdown_cell(summary['sandbox'].get('network'))} |",
         "",
         f"## {localize('report.summary', language)}",
         "",
-        f"- O: {counts.get('O', 0)}",
-        f"- X: {counts.get('X', 0)}",
-        f"- 👁: {counts.get('👁', 0)}",
-        f"- ?: {counts.get('?', 0)}",
-        f"- —: {counts.get('—', 0)}",
+        f"| {localize('report.status', language)} | {localize('report.count', language)} |",
+        "|---|---:|",
+        f"| O | {counts.get('O', 0)} |",
+        f"| X | {counts.get('X', 0)} |",
+        f"| 👁 | {counts.get('👁', 0)} |",
+        f"| ? | {counts.get('?', 0)} |",
+        f"| — | {counts.get('—', 0)} |",
         "",
         f"## {localize('report.unresolved', language)}",
         "",
@@ -366,28 +433,11 @@ def render_report(summary: dict[str, Any]) -> str:
         if result["status"] in {"X", "👁", "?"}
     ]
     if not unresolved:
-        lines.append(f"- {localize('report.none', language)}")
-    for result in unresolved:
-        lines.append(
-            f"- {result['status']} `{result['id']}` — {result['name']} "
-            f"(risk: {result['risk']})"
-        )
-        if result.get("artifact"):
-            lines.append(f"  - {localize('report.artifact', language, artifact=result['artifact'])}")
-        for instruction in result.get("instructions", []):
-            lines.append(f"  - {localize('report.manual', language, instruction=instruction)}")
+        lines.append(localize("report.none", language))
+    else:
+        lines.extend(_result_table(unresolved, language))
     lines.extend(["", f"## {localize('report.all_results', language)}", ""])
-    for result in summary["results"]:
-        lines.append(
-            f"- {result['status']} `{result['id']}` — "
-            f"{result['section']} / {result['name']}"
-        )
-        if result.get("mode") == "automated":
-            lines.append(
-                f"  - {localize('report.duration', language, duration=result['duration_seconds'])}"
-            )
-            lines.append(f"  - {localize('report.exit_code', language, exit_code=result['exit_code'])}")
-            lines.append(f"  - {localize('report.artifact', language, artifact=result['artifact'])}")
+    lines.extend(_result_table(summary["results"], language))
     lines.extend([
         "",
         f"## {localize('report.artifact_directory', language)}",

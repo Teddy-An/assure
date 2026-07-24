@@ -33,10 +33,13 @@ All `O` results and properly approved exclusions produce `releasable`.
 ## Report order
 
 1. Verdict
-2. Execution environment and baseline commit
-3. Counts
-4. Blocking and indeterminate scenarios
-5. Manual checks
-6. All section results
-7. Exclusions and reasons
-8. Artifact directory
+2. Metadata table: environment, baseline commit, project root, report path
+3. Status-count table
+4. Blocking and unresolved result table
+5. Complete scenario result table
+6. Artifact directory
+
+Keep the scenario columns stable:
+
+| Status | Risk | Section | ID | Scenario | Mode | Result / detail |
+|---|---|---|---|---|---|---|

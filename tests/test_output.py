@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.assure_output import detect_language, emit_json, localize
+from scripts.run_verification import render_report
 
 
 class Cp949FailingStream(io.StringIO):
@@ -45,6 +46,38 @@ class OutputTests(unittest.TestCase):
 
     def test_localize_returns_korean_catalog_message(self):
         self.assertEqual(localize("verdict.blocked", "ko"), "차단됨")
+
+    def test_report_renders_summary_and_results_as_markdown_tables(self):
+        report = render_report({
+            "language": "ko",
+            "verdict": "blocked",
+            "baseline_commit": "abc123",
+            "generated_at": "2026-07-24T00:00:00+00:00",
+            "counts": {"X": 1},
+            "sandbox": {
+                "provider": "local-isolated",
+                "network": "disabled",
+            },
+            "results": [{
+                "id": "payments.refund",
+                "name": "환불 | 중복 방지",
+                "section": "결제",
+                "risk": "critical",
+                "mode": "automated",
+                "status": "X",
+                "exit_code": 1,
+                "duration_seconds": 0.5,
+                "artifact": "/tmp/result.log",
+            }],
+            "artifact_directory": "/tmp/artifacts",
+        })
+        self.assertIn("| 항목 | 결과 |", report)
+        self.assertIn("| 상태 | 개수 |", report)
+        self.assertIn(
+            "| 상태 | 위험도 | 영역 | ID | 검증 항목 | 방식 | 결과 / 비고 |",
+            report,
+        )
+        self.assertIn("환불 \\| 중복 방지", report)
 
 
 if __name__ == "__main__":
