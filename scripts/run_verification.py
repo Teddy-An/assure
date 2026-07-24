@@ -384,6 +384,35 @@ def _display_mode(mode: str, language: str) -> str:
     return localize(f"report.mode_{mode}", language)
 
 
+def _tree_text(value: Any) -> str:
+    return " ".join(str(value).replace("`", "ʼ").split())
+
+
+def _result_tree(results: list[dict[str, Any]], language: str) -> list[str]:
+    lines = ["```text"]
+    position = 0
+    while position < len(results):
+        section = results[position]["section"]
+        section_results: list[dict[str, Any]] = []
+        while (
+            position < len(results)
+            and results[position]["section"] == section
+        ):
+            section_results.append(results[position])
+            position += 1
+        lines.append(f"{_tree_text(section)} ({len(section_results)})")
+        for index, result in enumerate(section_results):
+            branch = "└─" if index == len(section_results) - 1 else "├─"
+            lines.append(
+                f"{branch} {_display_result(result['status'], language)}  "
+                f"{_tree_text(result['name'])}"
+            )
+        if position < len(results):
+            lines.append("")
+    lines.append("```")
+    return lines
+
+
 def _result_table(
     results: list[dict[str, Any]],
     language: str,
@@ -444,6 +473,12 @@ def render_report(summary: dict[str, Any]) -> str:
         f"| {_display_result('—', language)} | {counts.get('—', 0)} |",
         "",
     ]
+    lines.extend([
+        f"## {localize('report.verification_tree', language)}",
+        "",
+    ])
+    lines.extend(_result_tree(summary["results"], language))
+    lines.append("")
     positions = {
         result["id"]: index
         for index, result in enumerate(summary["results"], start=1)

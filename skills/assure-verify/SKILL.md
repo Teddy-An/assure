@@ -56,6 +56,11 @@ discovery; continue only after `<python-command>` is selected.
    - result counts using localized labels, never raw status symbols;
    - every scenario with number, risk, section, ID, name, mode, localized
      result, and detail.
+   Between the count table and complete result table, show one fenced plain-text
+   feature tree in manifest order. Print each section as `<section> (<count>)`
+   and its scenarios as `├─ <localized result>  <scenario>` or
+   `└─ <localized result>  <scenario>`. Do not include IDs, risk, mode, or
+   detail in the tree.
    Show every scenario once in one complete result table; use the verdict and
    result-count table to summarize blockers. Keep manual instructions in the
    detail cell with `<br>` separators. Map `O` to

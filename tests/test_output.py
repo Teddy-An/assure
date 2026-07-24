@@ -73,6 +73,15 @@ class OutputTests(unittest.TestCase):
         })
         self.assertIn("| 항목 | 결과 |", report)
         self.assertIn("| 결과 | 개수 |", report)
+        self.assertIn("## 전체 기능 검증 구조", report)
+        self.assertIn(
+            "결제 (1)\n└─ 실패  환불 | 중복 방지",
+            report,
+        )
+        self.assertLess(
+            report.index("## 전체 기능 검증 구조"),
+            report.index("## 전체 결과"),
+        )
         self.assertIn(
             "| 번호 | 위험도 | 영역 | ID | 검증 항목 | 방식 | 결과 | 상세 |",
             report,
