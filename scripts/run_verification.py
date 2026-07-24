@@ -426,6 +426,32 @@ def _result_table(
     return lines
 
 
+def _tree_text(value: Any) -> str:
+    return " ".join(str(value).replace("\r", " ").replace("\n", " ").split())
+
+
+def _feature_tree(
+    results: list[dict[str, Any]],
+    language: str,
+) -> list[str]:
+    sections: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        sections.setdefault(str(result["section"]), []).append(result)
+    lines = ["```text"]
+    for section_index, (section, items) in enumerate(sections.items()):
+        if section_index:
+            lines.append("")
+        lines.append(f"{_tree_text(section)} ({len(items)})")
+        for item_index, item in enumerate(items):
+            connector = "└─" if item_index == len(items) - 1 else "├─"
+            result = _display_result(item["status"], language)
+            lines.append(
+                f"{connector} {result}  {_tree_text(item['name'])}"
+            )
+    lines.append("```")
+    return lines
+
+
 def render_report(summary: dict[str, Any]) -> str:
     counts = summary["counts"]
     language = summary.get("language", "en")
@@ -456,6 +482,9 @@ def render_report(summary: dict[str, Any]) -> str:
         result["id"]: index
         for index, result in enumerate(summary["results"], start=1)
     }
+    lines.extend([f"## {localize('report.feature_tree', language)}", ""])
+    lines.extend(_feature_tree(summary["results"], language))
+    lines.append("")
     lines.extend([f"## {localize('report.all_results', language)}", ""])
     lines.extend(_result_table(summary["results"], language, positions))
     lines.extend([

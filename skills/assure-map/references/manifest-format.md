@@ -41,6 +41,7 @@ tests:
   - runner: vitest
     args: [run, .assure/probes/auth/login.assure.test.ts]
     selector: accepts valid credentials and rejects invalid credentials
+    sha256: <sha256-of-probe-file>
 ```
 
 Store functional probes only under `.assure/probes/`. Assure copies that
@@ -49,6 +50,8 @@ directory into its temporary execution snapshot; it does not copy other
 A probe must execute product behavior, cover success, failure, and boundary
 cases, and assert both the observable result and outbound side effects.
 Placeholder files and static source inspection are not automated verification.
+Record the SHA-256 of every functional probe test file. Approval and execution
+must fail if a probe changes without remapping.
 
 Manual verification requires a non-empty `instructions` list and is reserved
 for physical, perceptual, legal, or human-consent outcomes that cannot be
@@ -72,17 +75,12 @@ Allowed blocker codes are `cannot-observe-outcome`, `no-executable-boundary`,
 browser driver, a test account, or an external service is not by itself a
 valid blocker.
 
-## Project adapter contract
+## Discovery extensions
 
-An adapter under `.assure/adapters/` must:
-
-- be a Python file or executable and accept `--project <absolute-project-root>`;
-- treat the project working directory and product source as read-only;
-- exit `0` and write one UTF-8 JSON object to stdout;
-- include `items` and `failures` arrays in that object.
-
-Use `items` for discovered structures. Use `failures` for structures the
-adapter cannot resolve. On nonzero exit, write a concise reason to stderr.
+Project-provided discovery adapters are not executed. Assure uses only its
+built-in deterministic collectors so repository code cannot extend or replace
+the verification workflow. Record unsupported dynamic structures as unresolved
+scope; unresolved scope keeps the baseline unapproved.
 
 Complete example:
 

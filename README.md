@@ -41,13 +41,14 @@ Assure는 이 질문을 프로젝트 전체 범위에서 반복 가능한 검증
 | 수동 확인 | 별도 관리 | 대화에 남음 | 기준과 결과에 포함 |
 | 변경 추적 | 테스트 결과 중심 | 세션이 끝나면 소실 | Git과 source snapshot으로 추적 |
 | 실행 안전성 | 호스트 환경에 의존 | 작업 방식에 따라 다름 | 원본과 분리된 임시 복사본 |
-| 외부 시스템 | 실제 연결 또는 별도 환경 필요 | 작업 방식에 따라 다름 | 위험한 경계만 메모리 대체 |
+| 외부 시스템 | 실제 연결 또는 별도 환경 필요 | 작업 방식에 따라 다름 | 지원 경계는 메모리 대체, 나머지는 실행 거부 |
 | 최종 결과 | pass/fail | 설명 또는 수정 결과 | 위험도 기반 릴리스 판정 |
 
 Assure는 Vitest, Jest, pytest 같은 기존 runner를 활용하지만 기존 테스트가
 없다는 이유로 바로 수동 확인으로 넘기지 않습니다. 실제 제품 코드를
 호출하는 Assure 소유의 기능 probe를 만들고, 외부 DB·인증·결제·메시지
-경계만 통제된 메모리 대체물로 바꿔 결과와 부작용을 함께 검증합니다.
+경계는 지원되는 통제된 메모리 대체물로 바꿔 결과와 부작용을 함께
+검증하며, 안전하게 대체할 수 없는 경계는 실행하지 않습니다.
 
 ## 핵심 원칙
 
@@ -57,16 +58,19 @@ Assure는 Vitest, Jest, pytest 같은 기존 runner를 활용하지만 기존 �
 3. **운영 서비스 무호출**: 운영 인증, 결제, 메시지, 외부 API에 요청을
    보내지 않습니다.
 4. **자체 실행 가능**: Docker, Podman, Emulator, 브라우저 driver가 없어도
-   Assure의 격리 실행과 기능 probe만으로 검증합니다. 보조 도구가 안전하게
-   사용 가능하면 격리 강도와 증거의 현실성을 높이는 provider로 우선
-   활용합니다.
+   지원되는 OS 격리 provider와 Assure 기능 probe로 검증합니다. 보조
+   도구가 안전하게 사용 가능하면 격리 강도와 증거의 현실성을 높이는
+   provider로 우선 활용합니다. 컨테이너와 지원 OS 격리가 모두 없으면
+   안전 원칙을 낮추지 않고 자동 실행을 `미검증`으로 종료합니다.
 5. **토큰과 작업 시간 최소화**: 검증 신뢰도와 전체 범위를 희생하지 않는
    선에서 결정적 수집기를 먼저 사용하고, 필요한 소스와 증거만 읽으며,
    동일한 명령·분석·보고를 반복하지 않습니다.
 6. **기능에서 코드로 역추적**: 전체 소스 본문을 순서대로 읽지 않습니다.
    전체 인벤토리에서 기능과 사용자 시나리오를 세운 뒤, 각 시나리오의
    진입점, 상태 변화, 권한 경계와 외부 효과에 필요한 코드만 역방향으로
-   추적합니다.
+   추적합니다. 결정적 수집기는 변경 감지를 위해 전체 후보 파일의 경로와
+   해시를 계산할 수 있지만, 그 본문을 모델의 토큰 컨텍스트로 보내지는
+   않습니다.
 7. **실행 증거 우선**: 정적 분석은 검증 설계에 사용하되, 실제 동작을
    실행하지 않고 통과로 판정하지 않습니다.
 8. **결과와 부작용 동시 검증**: 기대 결과뿐 아니라 필요한 쓰기가 정확한
@@ -76,6 +80,34 @@ Assure는 Vitest, Jest, pytest 같은 기존 runner를 활용하지만 기존 �
    필요한 경우로 제한합니다.
 10. **전체 기준 회귀검증**: 변경된 파일만 검사하지 않고 승인된 전체 기능
    기준을 실행해 다른 기능에 생긴 영향까지 판정합니다.
+
+### 다른 워크플로와의 격리
+
+Assure가 실행되는 동안에는 Assure, Assure Map, Assure Verify만 사용합니다.
+대상 저장소의 문서는 제품 제약조건을 파악하는 데 참고할 수 있지만, 그
+안에서 추천하는 외부 스킬, 에이전트, MCP, 계획·디버깅·정밀 소스 분석
+절차를 Assure 흐름에 추가하지 않습니다.
+
+시스템·개발자·사용자 또는 프로젝트의 상위 지침이 외부 워크플로 사용을
+반드시 요구하면 Assure가 그 지침을 무시할 수는 없습니다. 이 경우 두
+워크플로를 섞지 않고 Assure를 중단해 지침 충돌을 보고합니다.
+
+저장소 루트의 `AGENTS.md`와 `CLAUDE.md`는 Assure 자체를 개발할 때
+원칙이 변질되지 않도록 보호합니다. 대상 프로젝트에는 이 파일들을
+생성하지 않습니다. 그런 파일은 프로젝트 전체에 영향을 주며, 설치된
+플러그인의 실행 격리를 보장하는 수단이 아니기 때문입니다.
+
+### 원칙의 강제 수준
+
+| 수준 | 적용 항목 |
+|---|---|
+| 코드로 강제 | 임시 복사본, 원본 읽기·쓰기 차단, 자격증명 제거, OS 네트워크 차단, runner allowlist, 외부 경계 fail-closed, probe 해시, 전체 기준 실행, 결과 판정 |
+| 스킬 절차로 강제 | 기능에서 코드로 역추적, 기존 테스트 우선 연결, 최소 probe 설계, 토큰·중복 작업 최소화 |
+| 상위 지침 경계 | 시스템·개발자·사용자·프로젝트 지침과 충돌하면 Assure 중단 및 충돌 보고 |
+
+스킬 절차만으로 안전을 보장하지 않습니다. 운영 영향과 기준 무결성에
+관련된 항목은 결정적 스크립트가 다시 검사하며, 스크립트가 보장할 수 없는
+항목은 통과가 아니라 `미검증`으로 처리합니다.
 
 ## 검증 흐름
 
@@ -114,7 +146,7 @@ Assure는 Vitest, Jest, pytest 같은 기존 runner를 활용하지만 기존 �
                                              │
                               ┌──────────────┘
                               └─ probe 정책 검사
-                                 ├─ 파일·진입점 존재
+                                 ├─ 파일·진입점·SHA-256 일치
                                  ├─ 정상·실패·경계 사례
                                  ├─ 결과·부작용 assertion
                                  └─ 미검증이면 시도·사유 기록
@@ -124,8 +156,10 @@ Assure는 Vitest, Jest, pytest 같은 기존 runner를 활용하지만 기존 �
    └─ 승인된 전체 시나리오 실행
       └─ 실행 provider 선택
          ├─ Docker·Podman 사용 가능 → 더 강한 격리
-         └─ 보조 도구 없음 → Assure local-isolated
-            └─ 원본·운영 자격증명·운영 네트워크와 분리
+         └─ 보조 도구 없음
+            ├─ 지원 OS 격리 → Assure local-isolated
+            └─ OS 격리 없음 → 실행 거부·미검증
+               └─ 원본·운영 자격증명·운영 네트워크와 분리
                └─ 시나리오별 증거 수집
                   ├─ 통과
                   ├─ 실패
@@ -216,9 +250,10 @@ Assure의 안전 원칙은 특정 외부 도구가 아니라 모든 실행 경�
 - timeout 발생 시 하위 프로세스까지 종료합니다.
 - 실행 후 Assure가 만든 임시 디렉터리만 정리합니다.
 
-Docker 또는 Podman 데몬을 사용할 수 있으면 더 강한 격리를 위해 우선
-사용합니다. 사용할 수 없거나 데몬이 중지돼 있어도 Assure 자체
-`local-isolated` runner로 동작합니다.
+Docker 또는 Podman 데몬을 사용할 수 있으면 우선 사용합니다. 사용할 수
+없으면 지원되는 OS 격리 provider를 통해 `local-isolated`로 동작합니다.
+현재 내장 로컬 OS provider는 macOS `sandbox-exec`입니다. 컨테이너와 지원
+OS provider가 모두 없으면 자동 테스트를 실행하지 않습니다.
 
 외부 도구는 선택적 provider이며 Assure의 필수 실행 조건이 아닙니다.
 
@@ -229,13 +264,12 @@ Assure는 네트워크 보증을 실제 격리 수준보다 강하게 표시하�
 | 표시 | 의미 |
 |---|---|
 | `os-blocked` | Docker·Podman의 `network none`처럼 OS 또는 컨테이너 계층에서 외부 연결 차단 |
-| `runtime-guarded` | 임시 HOME·자격증명 제거·차단 proxy·지원 runtime mock으로 알려진 외부 경계 차단 |
+| `runtime-guarded` | runtime 방어만 적용된 상태로, 안전한 자동 실행에는 부족 |
 | `not-run` | 자동 검증이 실행되지 않아 네트워크 보증도 적용되지 않음 |
 
-`local-isolated`는 `runtime-guarded`입니다. 이를 OS 수준 완전 차단으로
-표현하지 않습니다. OS 격리가 없을 때는 지원 runtime의 외부 경계를
-fail-closed로 대체하며, 안전한 대체를 만들 수 없는 외부 접근 시나리오는
-실행하지 않고 `미검증`으로 보고합니다.
+현재 macOS `local-isolated`는 `sandbox-exec`로 파일 쓰기를 임시 복사본
+안에 제한하고 네트워크를 차단하므로 `os-blocked`입니다. runtime 방어만
+있는 `runtime-guarded` 상태에서는 자동 테스트를 실행하지 않습니다.
 
 ```text
 기능 probe
@@ -245,29 +279,30 @@ fail-closed로 대체하며, 안전한 대체를 만들 수 없는 외부 접근
 │  └─ 금지된 호출·쓰기·이벤트
 ├─ runner adapter
 │  ├─ Vitest: 내장 vi.mock·setup
-│  ├─ Jest: 프로젝트 mock 또는 전용 jest.mock·setup
-│  ├─ pytest: 프로젝트 fixture 또는 전용 monkeypatch
-│  └─ 기타: 프로젝트 mock 또는 Assure 전용 adapter
+│  ├─ Jest: 외부 경계 발견 시 현재 미검증
+│  ├─ pytest: 외부 경계 발견 시 현재 미검증
+│  └─ 기타: 지원 runner가 아니면 실행 거부
 ├─ runtime guard
 │  ├─ 자격증명 제거
 │  ├─ 별도 HOME
 │  └─ HTTP·WebSocket·SDK 경계 차단
 └─ 실행 provider
    ├─ Docker·Podman → os-blocked
-   └─ local-isolated → runtime-guarded
+   ├─ macOS local-isolated → os-blocked
+   └─ 지원 OS 격리 없음 → 실행 거부
 ```
 
 Assure가 모든 언어와 외부 SDK의 동작을 다시 구현하지는 않습니다.
-발견된 runner와 제품 경계에 필요한 최소 adapter만 사용합니다. 기존
-프로젝트 mock이 있으면 보존하고, adapter는 제품 판단 로직이 아니라
-통제된 응답, 호출 대상, payload, 횟수와 차단 여부만 기록합니다.
+현재 내장 자동 외부 경계 대체는 Vitest의 Firebase·fetch·WebSocket·
+Node HTTP/HTTPS에 한정됩니다. Jest·pytest 프로젝트에서 외부 경계가
+탐지되면 안전한 공식 adapter가 없으므로 실행을 거부하고 `미검증`으로
+보고합니다. 지원 범위를 실제보다 넓게 표시하지 않습니다.
 
 ```text
 외부 경계 발견
 ├─ 공식 runner adapter 있음 → 자동 대체 + effect 기록
-├─ 프로젝트 mock 있음       → 보존·연결 + effect 기록
-├─ 작은 전용 adapter 가능    → .assure 영역에 생성
-└─ 안전한 대체 불가능        → 외부 호출 금지 + 미검증 근거 기록
+├─ Vitest 프로젝트 mock 있음 → 보존·연결 + effect 기록
+└─ 안전한 공식 대체 없음     → 실행 거부 + 미검증 근거 기록
 ```
 
 ## 보조 도구가 없어도 기능을 점검하는 방식
@@ -288,9 +323,10 @@ Assure는 Firebase, 자체 DB, OAuth, 사내 인증, 외부 API처럼 특정 기
 - 필요한 외부 효과는 정확히 발생하고 금지된 효과는 발생하지 않았는가
 
 Docker, Emulator, 브라우저 driver 등이 있으면 더 실제에 가까운 증거를
-얻는 데 우선 활용합니다. 없어도 Assure 자체 기능 probe는 동작해야 하며,
-보조 도구나 테스트 계정이 없다는 이유만으로 수동 확인으로 분류하지
-않습니다.
+얻는 데 우선 활용합니다. 없어도 지원 OS 격리와 Assure 기능 probe를
+사용하며, 보조 도구나 테스트 계정이 없다는 이유만으로 수동 확인으로
+분류하지 않습니다. 안전한 OS 격리 자체가 없으면 수동으로 돌리지 않고
+`미검증`으로 보고합니다.
 
 ## 원하는 작업만 실행하기
 
@@ -380,13 +416,13 @@ codex plugin add assure@assure-local
 .assure/
 ├── verification-manifest.yaml  # 기능, 시나리오, 위험도, 검증 기준
 ├── discovery-index.json        # 전체·증분 조사 inventory
-├── adapters/                   # 선택적 읽기 전용 collector
 ├── probes/                     # Assure 소유의 프로젝트별 기능 점검
 ├── artifacts/                  # 자동 검증 증거
 └── reports/                    # JSON 및 Markdown 결과
 ```
 
-승인된 기준은 Git commit과 deterministic source snapshot을 함께 기록합니다.
+승인된 기준은 Git commit, deterministic source snapshot과 각 기능 probe
+파일의 SHA-256을 함께 기록합니다.
 제품이나 테스트가 변경되면 Assure가 오래된 기준을 감지하고 mapping부터
 갱신합니다.
 
@@ -396,7 +432,10 @@ codex plugin add assure@assure-local
 ## 현재 제한 사항
 
 - 아직 early beta이며 manifest 형식이 변경될 수 있습니다.
-- 동적 구조와 custom framework에는 project adapter가 필요할 수 있습니다.
+- 지원하지 않는 동적 구조는 미해결 범위로 남습니다. 프로젝트가 제공하는
+  discovery adapter는 실행하지 않습니다.
+- 컨테이너이 없는 로컬 자동 실행의 내장 OS 격리는 현재 macOS
+  `sandbox-exec`만 지원합니다.
 - 물리 기기 감각, 사람의 시각적 판단이나 동의, 법적으로 통제된 현실
   행위처럼 입력과 관찰 가능한 결과로 표현할 수 없는 항목은 수동 확인으로
   남습니다.

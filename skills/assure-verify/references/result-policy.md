@@ -35,8 +35,9 @@ All `O` results and properly approved exclusions produce `releasable`.
 1. Verdict
 2. Metadata table: environment, baseline commit, project root, report path
 3. Status-count table
-4. Complete scenario result table
-5. Artifact directory
+4. Feature tree grouped by section
+5. Complete scenario result table
+6. Artifact directory
 
 Show each scenario exactly once. Summarize blocking and unresolved results in
 the verdict and status-count table instead of repeating those rows separately.
@@ -63,5 +64,5 @@ Report the runner's exact network assurance without upgrading the claim:
 | Internal | Meaning |
 |---|---|
 | `os-blocked` | OS or container network isolation is active |
-| `runtime-guarded` | Credentials, proxy settings, and supported runtime boundaries are guarded, without an OS-level guarantee |
+| `runtime-guarded` | Runtime defenses exist without an OS-level guarantee; automated execution must not proceed |
 | `not-run` | Automated verification did not run |

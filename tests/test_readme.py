@@ -41,6 +41,16 @@ class ReadmeTests(unittest.TestCase):
         self.assertIn("Assure", README.read_text(encoding="utf-8"))
         self.assertIn("Assure", README_EN.read_text(encoding="utf-8"))
 
+    def test_readmes_document_isolation_enforcement_boundaries(self):
+        for path in (README, README_EN):
+            content = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.name):
+                self.assertIn("AGENTS.md", content)
+                self.assertIn("CLAUDE.md", content)
+                self.assertIn("os-blocked", content)
+                self.assertIn("runtime-guarded", content)
+                self.assertIn("SHA-256", content)
+
     def test_readmes_define_assure_owned_functional_probes(self):
         korean = README.read_text(encoding="utf-8")
         english = README_EN.read_text(encoding="utf-8")

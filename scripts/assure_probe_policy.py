@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -183,6 +184,20 @@ def _validate_functional_probe(
                 f"{path.relative_to(project_root).as_posix()}"
             )
             continue
+        expected_sha256 = test.get("sha256")
+        if not isinstance(expected_sha256, str) or not re.fullmatch(
+            r"[0-9a-f]{64}",
+            expected_sha256,
+        ):
+            errors.append(
+                f"{scenario_id}: probe test {index} sha256 is missing or invalid"
+            )
+        else:
+            actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+            if actual_sha256 != expected_sha256:
+                errors.append(
+                    f"{scenario_id}: probe test {index} sha256 does not match"
+                )
         errors.extend(
             _validate_probe_source(
                 path,

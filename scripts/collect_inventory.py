@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,44 +19,6 @@ def load_hashes(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def run_adapter(adapter: Path, project_root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    command = [str(adapter), "--project", str(project_root)]
-    if adapter.suffix.lower() == ".py":
-        command.insert(0, sys.executable)
-    try:
-        result = subprocess.run(
-            command,
-            cwd=project_root,
-            capture_output=True,
-            timeout=15,
-        )
-    except OSError as exc:
-        return [], [{"adapter": adapter.name, "reason": str(exc) or type(exc).__name__}]
-    except subprocess.TimeoutExpired:
-        return [], [{"adapter": adapter.name, "reason": "timed out after 15 seconds"}]
-    try:
-        stdout = result.stdout.decode("utf-8")
-    except UnicodeDecodeError:
-        return [], [{"adapter": adapter.name, "reason": "invalid JSON: adapter output is not UTF-8"}]
-    if result.returncode != 0:
-        return [], [{
-            "adapter": adapter.name,
-            "reason": result.stderr.decode("utf-8", errors="replace").strip()
-            or f"exit {result.returncode}",
-        }]
-    try:
-        payload = json.loads(stdout)
-    except json.JSONDecodeError as exc:
-        return [], [{"adapter": adapter.name, "reason": f"invalid JSON: {exc}"}]
-    if not isinstance(payload, dict):
-        return [], [{"adapter": adapter.name, "reason": "invalid JSON: expected object"}]
-    items = payload.get("items", [])
-    failures = payload.get("failures", [])
-    if not isinstance(items, list) or not isinstance(failures, list):
-        return [], [{"adapter": adapter.name, "reason": "invalid JSON: items and failures must be arrays"}]
-    return items, failures
 
 
 def collect_inventory(project_root: Path) -> dict[str, Any]:
@@ -80,17 +39,17 @@ def collect_inventory(project_root: Path) -> dict[str, Any]:
     unchanged = sorted(path for path, digest in current.items() if previous.get(path) == digest)
     deleted = sorted(path for path in previous if path not in current)
 
-    adapter_items: list[dict[str, Any]] = []
     adapter_failures: list[dict[str, Any]] = []
     adapters_dir = assure / "adapters"
     if adapters_dir.exists():
         for adapter in sorted(path for path in adapters_dir.iterdir() if path.is_file()):
-            if adapter.suffix.lower() != ".py" and not os.access(adapter, os.X_OK):
-                adapter_failures.append({"adapter": adapter.name, "reason": "not executable"})
-                continue
-            items, failures = run_adapter(adapter, root)
-            adapter_items.extend(items)
-            adapter_failures.extend(failures)
+            adapter_failures.append({
+                "adapter": adapter.name,
+                "reason": (
+                    "project-provided discovery adapters are disabled; "
+                    "Assure executes only built-in collectors"
+                ),
+            })
 
     result = {
         "environment": detect_environment(root),
@@ -99,7 +58,7 @@ def collect_inventory(project_root: Path) -> dict[str, Any]:
         "changed_files": changed,
         "unchanged_files": unchanged,
         "deleted_files": deleted,
-        "adapter_items": adapter_items,
+        "adapter_items": [],
         "adapter_failures": adapter_failures,
     }
     write_json(assure / "discovery-index.json", result)

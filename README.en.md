@@ -41,14 +41,15 @@ Discover features → Derive inputs, outputs, and effects → Map existing tests
 | Manual checks | Managed elsewhere | Left in conversation | Stored in the baseline and results |
 | Change tracking | Test-result focused | Lost with the session | Git plus a source snapshot |
 | Execution safety | Depends on the host | Depends on the approach | Assure-owned temporary copy |
-| External systems | Real connection or separate environment | Depends on the approach | Only unsafe boundaries are replaced |
+| External systems | Real connection or separate environment | Depends on the approach | Replace supported boundaries and reject the rest |
 | Final output | Pass/fail | Explanation or code changes | Risk-based release verdict |
 
 Assure uses Vitest, Jest, pytest, and other existing runners, but it does not
 send a scenario directly to manual confirmation just because no existing test
 covers it. It creates an Assure-owned functional probe that calls real product
 code, replaces only unsafe database, identity, payment, messaging, or API
-boundaries, and verifies results and effects.
+boundaries when supported, and verifies results and effects. It does not
+execute a boundary that cannot be replaced safely.
 
 ## Core principles
 
@@ -58,16 +59,20 @@ boundaries, and verifies results and effects.
    storage, or account data.
 3. **Do not call production services**: Never send requests to production
    identity, payment, messaging, or external APIs.
-4. **Work independently**: Run with Assure isolation and functional probes even
-   without Docker, Podman, emulators, or browser drivers. When safely available,
-   use them as providers that strengthen isolation and evidence realism.
+4. **Work independently**: Run with a supported OS isolation provider and
+   Assure functional probes even without Docker, Podman, emulators, or browser
+   drivers. When safely available, use helpers to strengthen isolation and
+   evidence realism. If neither a container nor supported OS isolation exists,
+   keep the safety contract and report automated execution as Unverified.
 5. **Minimize tokens and elapsed work**: Without sacrificing verification
    trust or full scope, use deterministic collectors first, read only necessary
    source and evidence, and avoid repeated commands, analysis, and reporting.
 6. **Trace backward from behavior**: Do not read every source file in order.
    Build features and user scenarios from the full inventory, then trace only
    the entry points, state transitions, authorization boundaries, and effects
-   needed by each scenario.
+   needed by each scenario. Deterministic collectors may hash paths and bytes
+   across all candidate files for change detection without placing those
+   source bodies in model context.
 7. **Require execution evidence**: Use static analysis to design verification,
    never to declare a behavioral pass without execution.
 8. **Verify outcomes and effects**: Check expected results, exact required
@@ -77,6 +82,34 @@ boundaries, and verifies results and effects.
    consent-dependent outcomes.
 10. **Regress the complete baseline**: Run every approved feature scenario, not
    only changed files, to detect effects on other functionality.
+
+### Isolation from other workflows
+
+While Assure runs, use only Assure, Assure Map, and Assure Verify. Repository
+documents may provide product constraints, but procedures, prompts, agents,
+skills, MCP servers, planning systems, debugging systems, or deep source
+analysis workflows referenced by them do not extend the Assure workflow.
+
+Assure cannot override higher-priority system, developer, user, or project
+instructions. If one requires an incompatible external workflow, Assure stops
+and reports the instruction conflict instead of combining both workflows.
+
+The root `AGENTS.md` and `CLAUDE.md` protect these principles while developing
+Assure itself. Assure does not create either file in a target project. Those
+files affect the entire project and do not provide runtime isolation for an
+installed plugin.
+
+### Enforcement levels
+
+| Level | Applied controls |
+|---|---|
+| Enforced by code | Temporary copy, original read/write protection, credential stripping, OS network denial, runner allowlist, outbound fail-closed checks, probe hashes, complete-baseline execution, verdict policy |
+| Enforced by skill workflow | Behavior-first reverse tracing, existing-test mapping, minimal probe design, token and duplicate-work minimization |
+| Higher-priority boundary | Stop Assure and report a conflict when system, developer, user, or project instructions are incompatible |
+
+Safety does not rely on skill prose alone. Deterministic scripts recheck
+production-impact and baseline-integrity controls. Anything those scripts
+cannot guarantee is Unverified, never Passed.
 
 ## Verification flow
 
@@ -115,7 +148,7 @@ User request
                                              │
                               ┌──────────────┘
                               └─ Validate probe policy
-                                 ├─ File and entry point exist
+                                 ├─ File, entry point, and SHA-256 match
                                  ├─ Success/failure/boundary cases
                                  ├─ Result/effect assertions
                                  └─ Record attempts for unverified items
@@ -125,8 +158,10 @@ User request
    └─ Execute every approved scenario
       └─ Select execution provider
          ├─ Docker or Podman available → stronger isolation
-         └─ No helper → Assure local-isolated
-            └─ Separate source, credentials, and production network
+         └─ No helper
+            ├─ Supported OS isolation → Assure local-isolated
+            └─ No OS isolation → reject execution as Unverified
+               └─ Separate source, credentials, and production network
                └─ Collect evidence for every scenario
                   ├─ Passed
                   ├─ Failed
@@ -216,9 +251,10 @@ Assure's safety principles apply to every execution provider.
 - Terminate child processes when a timeout occurs.
 - Remove only temporary directories created by Assure.
 
-When a healthy Docker or Podman daemon is available, Assure prefers it for
-stronger isolation. Without one, Assure remains functional through its own
-`local-isolated` runner.
+When a healthy Docker or Podman daemon is available, Assure prefers it. Without
+one, Assure uses a supported OS isolation provider for `local-isolated`.
+The current built-in local OS provider is macOS `sandbox-exec`. Without a
+container or supported OS provider, Assure does not execute automated tests.
 
 External tools are optional providers, not requirements for Assure to work.
 
@@ -230,13 +266,12 @@ actually provides.
 | Label | Meaning |
 |---|---|
 | `os-blocked` | External connections are blocked at the OS or container layer, such as Docker or Podman `network none` |
-| `runtime-guarded` | Known outbound boundaries are guarded with a temporary HOME, stripped credentials, blocking proxies, and supported runtime mocks |
+| `runtime-guarded` | Runtime defenses only; insufficient to authorize automated execution |
 | `not-run` | Automated verification did not run, so no network guarantee was applied |
 
-`local-isolated` is `runtime-guarded`, not an OS-level network block. Without
-OS isolation, Assure replaces supported runtime boundaries fail-closed. If it
-cannot build a safe replacement for an outbound scenario, it does not execute
-that scenario and reports it as Unverified.
+Current macOS `local-isolated` uses `sandbox-exec` to restrict writes to the
+temporary copy and deny network access, so it is `os-blocked`. Assure does not
+run automated tests in a `runtime-guarded`-only state.
 
 ```text
 Functional probe
@@ -246,29 +281,30 @@ Functional probe
 │  └─ Forbidden calls, writes, and events
 ├─ Runner adapter
 │  ├─ Vitest: built-in vi.mock and setup
-│  ├─ Jest: project mock or dedicated jest.mock and setup
-│  ├─ pytest: project fixture or dedicated monkeypatch
-│  └─ Other: project mock or Assure-owned adapter
+│  ├─ Jest: currently Unverified when outbound boundaries exist
+│  ├─ pytest: currently Unverified when outbound boundaries exist
+│  └─ Other: reject unsupported runners
 ├─ Runtime guard
 │  ├─ Stripped credentials
 │  ├─ Separate HOME
 │  └─ Blocked HTTP, WebSocket, and SDK boundaries
 └─ Execution provider
    ├─ Docker or Podman → os-blocked
-   └─ local-isolated → runtime-guarded
+   ├─ macOS local-isolated → os-blocked
+   └─ No supported OS isolation → reject execution
 ```
 
-Assure does not reimplement every language or external SDK. It uses the
-smallest adapter needed for the discovered runner and product boundary.
-Existing project mocks are preserved. An adapter records controlled responses,
-targets, payloads, counts, and blocking decisions—not product decision logic.
+Assure does not reimplement every language or external SDK. Built-in automatic
+boundary replacement currently covers Firebase, fetch, WebSocket, and Node
+HTTP/HTTPS under Vitest. When an outbound boundary is detected in Jest or
+pytest, Assure rejects execution and reports Unverified because no official
+safe adapter exists. It never reports broader support than it implements.
 
 ```text
 Outbound boundary found
 ├─ Official runner adapter   → replace and record effects
-├─ Existing project mock     → preserve, connect, and record
-├─ Small adapter is feasible → create it under .assure
-└─ No safe replacement       → forbid the call and record Unverified evidence
+├─ Existing Vitest mock      → preserve, connect, and record
+└─ No official replacement   → reject and record Unverified evidence
 ```
 
 ## Functional verification without helper tools
@@ -291,8 +327,10 @@ in-memory fakes or spies. The probe verifies both:
 - required outbound effects and the absence of forbidden effects.
 
 Docker, emulators, and browser drivers can provide stronger evidence when
-available. Assure-owned probes must still work without them, and a missing
-helper or test account alone is not a reason for manual verification.
+available. Assure-owned probes use supported OS isolation without them, and a
+missing helper or test account alone is not a reason for manual verification.
+When safe OS isolation itself is unavailable, Assure reports Unverified rather
+than moving the check to manual execution.
 
 ## Run a specific workflow
 
@@ -374,15 +412,15 @@ Start a new Codex thread after installation so the Assure skills are loaded.
 .assure/
 ├── verification-manifest.yaml  # Features, scenarios, risks, baseline
 ├── discovery-index.json        # Full and incremental inventory
-├── adapters/                   # Optional read-only collectors
 ├── probes/                     # Assure-owned project-specific functional checks
 ├── artifacts/                  # Automated verification evidence
 └── reports/                    # JSON and Markdown results
 ```
 
-An approved baseline records both Git provenance and a deterministic source
-snapshot. When product or test files change, Assure detects the stale baseline
-and updates the map before verification.
+An approved baseline records Git provenance, a deterministic source snapshot,
+and the SHA-256 of every functional probe. When product, test, or probe files
+change, Assure detects the stale baseline and updates the map before
+verification.
 
 The verification baseline is stored in
 `.assure/verification-manifest.yaml`, and the discovery inventory is stored in
@@ -391,7 +429,10 @@ The verification baseline is stored in
 ## Current limitations
 
 - Assure is early beta, and its manifest format may change.
-- Dynamic structures and custom frameworks may require project adapters.
+- Unsupported dynamic structures remain unresolved; project-provided discovery
+  adapters are never executed.
+- Built-in local OS isolation without a container currently supports macOS
+  `sandbox-exec`.
 - Physical-device perception, human visual judgment or consent, and legally
   controlled real-world actions may remain manual when they cannot be
   represented by controlled input and observable output.

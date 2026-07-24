@@ -1,3 +1,4 @@
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,14 @@ from scripts.assure_common import AssureError
 from scripts.assure_probe_policy import (
     require_valid_probe_policy,
     validate_probe_policy,
+)
+
+PROBE_SOURCE = (
+    "import { expect, test } from 'vitest'\n"
+    "import { login } from '../../../src/auth'\n"
+    "test('login success failure boundary', () => {\n"
+    "  expect(login()).toBe(true)\n"
+    "})\n"
 )
 
 
@@ -55,20 +64,16 @@ class ProbePolicyTests(unittest.TestCase):
                 "runner": "vitest",
                 "args": ["run", ".assure/probes/auth/login.test.ts"],
                 "selector": "accepts valid and rejects invalid credentials",
+                "sha256": hashlib.sha256(
+                    PROBE_SOURCE.encode("utf-8")
+                ).hexdigest(),
             }],
         }
 
     def write_probe(self, root: Path) -> None:
         probe = root / ".assure" / "probes" / "auth" / "login.test.ts"
         probe.parent.mkdir(parents=True)
-        probe.write_text(
-            "import { expect, test } from 'vitest'\n"
-            "import { login } from '../../../src/auth'\n"
-            "test('login success failure boundary', () => {\n"
-            "  expect(login()).toBe(true)\n"
-            "})\n",
-            encoding="utf-8",
-        )
+        probe.write_text(PROBE_SOURCE, encoding="utf-8")
 
     def test_valid_functional_probe_requires_real_file_and_evidence(self):
         root = self.make_root()
@@ -108,6 +113,19 @@ class ProbePolicyTests(unittest.TestCase):
         self.assertIn("no executable test body", str(validation.errors))
         self.assertIn("no test declaration", str(validation.errors))
         self.assertIn("no result assertion", str(validation.errors))
+        self.assertIn("sha256 does not match", str(validation.errors))
+
+    def test_probe_changed_after_approval_is_rejected(self):
+        root = self.make_root()
+        self.write_probe(root)
+        manifest = self.manifest(self.functional_probe())
+        probe = root / ".assure" / "probes" / "auth" / "login.test.ts"
+        probe.write_text(PROBE_SOURCE + "// changed\n", encoding="utf-8")
+
+        validation = validate_probe_policy(manifest, root)
+
+        self.assertFalse(validation.valid)
+        self.assertIn("sha256 does not match", str(validation.errors))
 
     def test_probe_without_required_cases_and_assertions_is_rejected(self):
         root = self.make_root()

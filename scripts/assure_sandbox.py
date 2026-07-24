@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import stat
@@ -46,13 +47,14 @@ class Sandbox:
     network: str = ""
     python_executable: str | None = None
     node_executable: str | None = None
+    local_guard: str | None = None
 
     def __post_init__(self) -> None:
         if not self.network:
             self.network = (
-                "runtime-guarded"
-                if self.provider == "local-isolated"
-                else "os-blocked"
+                "os-blocked"
+                if self.provider != "local-isolated" or self.local_guard
+                else "runtime-guarded"
             )
 
     @property
@@ -229,20 +231,38 @@ class Sandbox:
     def wrap(self, argv: list[str], runner: str) -> list[str]:
         if not self.is_container:
             if runner == "pytest":
-                return [
+                command = [
                     self.python_executable or sys.executable,
                     "-m",
                     "pytest",
                     *argv[3:],
                 ]
-            node = self.node_executable or shutil.which("node")
-            if not node:
-                raise AssureError("Node.js is unavailable after bootstrap")
-            package = "vitest/vitest.mjs" if runner == "vitest" else "jest/bin/jest.js"
-            command = [node, str(self.root / "node_modules" / package), *argv[3:]]
-            if runner == "vitest":
-                command.append("--config=.assure-vitest.config.mjs")
-            return command
+            else:
+                node = self.node_executable or shutil.which("node")
+                if not node:
+                    raise AssureError("Node.js is unavailable after bootstrap")
+                package = (
+                    "vitest/vitest.mjs"
+                    if runner == "vitest"
+                    else "jest/bin/jest.js"
+                )
+                command = [
+                    node,
+                    str(self.root / "node_modules" / package),
+                    *argv[3:],
+                ]
+                if runner == "vitest":
+                    command.append("--config=.assure-vitest.config.mjs")
+            if not self.local_guard:
+                raise SandboxUnavailable(
+                    "local OS filesystem and network isolation is unavailable"
+                )
+            return [
+                self.local_guard,
+                "-f",
+                str(self.root / ".assure-sandbox.sb"),
+                *command,
+            ]
         image = "python:3.13" if runner == "pytest" else "node:22"
         if runner == "pytest":
             container_argv = ["python", "-m", "pytest", *argv[3:]]
@@ -311,6 +331,52 @@ def _contains_link(root: Path) -> bool:
     return False
 
 
+def _unsafe_source_link(root: Path) -> Path | None:
+    for directory, names, filenames in os.walk(root, followlinks=False):
+        base = Path(directory)
+        kept_names: list[str] = []
+        for name in names:
+            if _excluded_name(name):
+                continue
+            path = base / name
+            if path.is_symlink():
+                return path
+            if os.name == "nt":
+                attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+                if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                    return path
+            kept_names.append(name)
+        names[:] = kept_names
+        for name in filenames:
+            if _excluded_name(name):
+                continue
+            path = base / name
+            if path.is_symlink():
+                return path
+            if os.name == "nt":
+                attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+                if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                    return path
+    return None
+
+
+def _write_macos_profile(root: Path, source: Path) -> None:
+    profile = (
+        "(version 1)\n"
+        "(allow default)\n"
+        "(deny network*)\n"
+        "(deny file-read* (subpath \"/Users\"))\n"
+        "(deny file-read* (subpath \"/Volumes\"))\n"
+        "(deny file-read* (subpath \"/Network\"))\n"
+        f"(deny file-read* (subpath {json.dumps(str(source))}))\n"
+        f"(allow file-read* (subpath {json.dumps(str(root))}))\n"
+        "(deny file-write*)\n"
+        f"(allow file-write* (subpath {json.dumps(str(root))}))\n"
+        "(allow file-write* (literal \"/dev/null\"))\n"
+    )
+    (root / ".assure-sandbox.sb").write_text(profile, encoding="utf-8")
+
+
 def _copy_functional_probes(source: Path, sandbox_root: Path) -> None:
     probes = source / ".assure" / "probes"
     if not probes.exists():
@@ -370,8 +436,19 @@ def prepare_sandbox(project_root: Path) -> Sandbox:
         if candidate and _runtime_ready(candidate):
             provider = Path(candidate).name
             break
-    root = Path(tempfile.mkdtemp(prefix="assure-sandbox-")).resolve()
+    local_guard = None
+    if provider is None and sys.platform == "darwin":
+        local_guard = shutil.which("sandbox-exec")
+    if provider is None and not local_guard:
+        raise SandboxUnavailable(
+            "Docker, Podman, or a supported local OS isolation provider is required"
+        )
     source = project_root.resolve()
+    unsafe_link = _unsafe_source_link(source)
+    if unsafe_link is not None:
+        relative = unsafe_link.relative_to(source).as_posix()
+        raise SandboxUnavailable(f"source link is not allowed: {relative}")
+    root = Path(tempfile.mkdtemp(prefix="assure-sandbox-")).resolve()
     for item in source.iterdir():
         if _excluded_name(item.name):
             continue
@@ -385,10 +462,16 @@ def prepare_sandbox(project_root: Path) -> Sandbox:
             shutil.copy2(item, target)
     try:
         _copy_functional_probes(source, root)
+        if local_guard:
+            _write_macos_profile(root, source)
     except BaseException:
         cleanup_sandbox(root)
         raise
-    return Sandbox(root=root, provider=provider or "local-isolated")
+    return Sandbox(
+        root=root,
+        provider=provider or "local-isolated",
+        local_guard=local_guard,
+    )
 
 
 def cleanup_sandbox(root: Path) -> None:

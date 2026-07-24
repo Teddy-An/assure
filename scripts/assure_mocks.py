@@ -15,6 +15,23 @@ class MockInjection:
 
 
 KNOWN_OUTBOUND = {"firebase", "fetch", "WebSocket", "node:http", "node:https"}
+SOURCE_SUFFIXES = {".js", ".jsx", ".py", ".ts", ".tsx"}
+OUTBOUND_PATTERNS = {
+    "firebase": r"\bfirebase(?:_admin|/|\.)",
+    "fetch": r"\bfetch\s*\(",
+    "WebSocket": r"\bWebSocket\b",
+    "node:http": (
+        r"(?:from\s+|require\()\s*['\"](?:node:)?https?['\"]"
+    ),
+    "direct-socket": r"\b(?:socket|node:net|node:tls)\b",
+    "python-http": r"\b(?:requests|httpx|aiohttp|urllib3?)\b",
+    "node-http-client": r"\b(?:axios|got|undici)\b",
+    "database-client": (
+        r"\b(?:sqlalchemy|psycopg|pymongo|redis|mysql|postgres|mongodb|"
+        r"google\.cloud|boto3)\b"
+    ),
+    "rpc-client": r"\b(?:grpc|amqp|kafka|celery)\b",
+}
 EXCLUDED_SOURCE_DIRECTORIES = {
     ".git", ".next", "build", "coverage", "dist", "node_modules", "vendor",
 }
@@ -30,20 +47,36 @@ def _project_sources(sandbox_root: Path) -> str:
         base = Path(directory)
         for name in filenames:
             path = base / name
-            if path.suffix in {".ts", ".tsx", ".js", ".jsx"}:
+            if path.suffix in SOURCE_SUFFIXES:
                 chunks.append(path.read_text(encoding="utf-8", errors="ignore"))
     return "\n".join(chunks)
+
+
+def _detected_outbound(source: str) -> set[str]:
+    return {
+        name
+        for name, pattern in OUTBOUND_PATTERNS.items()
+        if re.search(pattern, source, re.IGNORECASE)
+    }
 
 
 def inject_mocks(sandbox_root: Path, framework: str) -> MockInjection:
     result = MockInjection()
     sources = _project_sources(sandbox_root)
+    outbound = _detected_outbound(sources)
     if framework != "vitest":
-        if re.search(r"firebase|fetch\s*\(|WebSocket|node:(?:http|https)", sources):
+        if outbound:
             result.unverifiable.append(
-                f"automatic outbound mocks are unavailable for {framework}"
+                "safe outbound adapter is unavailable for "
+                f"{framework}: {', '.join(sorted(outbound))}"
             )
         return result
+    unsupported = outbound - KNOWN_OUTBOUND
+    if unsupported:
+        result.unverifiable.append(
+            "safe outbound adapter is unavailable for vitest: "
+            + ", ".join(sorted(unsupported))
+        )
     if re.search(r"vi\.mock\(['\"]firebase/", sources):
         result.conflicts.append("firebase: user mock preserved")
         firebase_setup = ""

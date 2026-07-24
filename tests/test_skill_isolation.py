@@ -1,4 +1,5 @@
 import unittest
+import re
 from pathlib import Path
 
 
@@ -11,6 +12,15 @@ SKILL_PATHS = (
 
 
 class SkillIsolationTests(unittest.TestCase):
+    def test_repository_rules_prevent_external_workflow_dependencies(self):
+        rules = (PLUGIN_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Keep Assure self-contained", rules)
+        self.assertIn("Do not add dependencies on external workflow", rules)
+        self.assertIn("Do not combine Assure runtime verification", rules)
+        claude = (PLUGIN_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("Follow `AGENTS.md`", claude)
+        self.assertIn("Do not invoke or adopt external workflow", claude)
+
     def test_assure_skills_are_exclusive_workflows(self):
         for path in SKILL_PATHS:
             text = path.read_text(encoding="utf-8")
@@ -20,6 +30,27 @@ class SkillIsolationTests(unittest.TestCase):
                 self.assertIn(
                     "Do not invoke or apply other workflow skills", normalized
                 )
+                self.assertIn(
+                    "stop Assure and report the instruction conflict", normalized
+                )
+
+    def test_assure_skills_reference_only_assure_routed_skills(self):
+        for path in SKILL_PATHS:
+            text = path.read_text(encoding="utf-8")
+            references = re.findall(r"\$([a-z0-9:-]+)", text)
+            with self.subTest(skill=path.parent.name):
+                self.assertTrue(
+                    all(value.startswith("assure:") for value in references),
+                    references,
+                )
+
+    def test_assure_skills_do_not_name_external_workflow_plugins(self):
+        forbidden = ("super" + "powers", "under" + "stand-anything")
+        for path in SKILL_PATHS:
+            text = path.read_text(encoding="utf-8").lower()
+            with self.subTest(skill=path.parent.name):
+                for value in forbidden:
+                    self.assertNotIn(value, text)
 
     def test_assure_skills_require_supported_python_runtime(self):
         required = (
