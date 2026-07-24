@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -55,70 +54,24 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(result["changed_files"], [])
         self.assertEqual(result["unchanged_files"], ["app.py"])
 
-    def test_python_adapter_runs_without_an_executable_bit(self):
+    def test_project_adapter_is_never_executed(self):
         root = self.make_root()
         adapters = root / ".assure" / "adapters"
         adapters.mkdir(parents=True)
-        adapter = adapters / "read_only_adapter.py"
+        marker = root / "must-not-exist"
+        adapter = adapters / "external_adapter.py"
         adapter.write_text(
-            "#!" + sys.executable + "\n"
-            "import json\n"
-            "import sys\n"
-            "assert sys.argv == [sys.argv[0], '--project', str(__import__('pathlib').Path(sys.argv[2]).resolve())]\n"
-            "print(json.dumps({'items': [{'kind': 'route', 'path': 'api/health'}], "
-            "'failures': [{'reason': 'partial discovery'}]}))\n",
+            "from pathlib import Path\n"
+            f"Path({str(marker)!r}).touch()\n",
             encoding="utf-8",
         )
-        original_adapter = adapter.read_text(encoding="utf-8")
 
         result = collect_inventory(root)
 
-        self.assertEqual(result["adapter_items"], [{"kind": "route", "path": "api/health"}])
-        self.assertEqual(result["adapter_failures"], [{"reason": "partial discovery"}])
-        self.assertEqual(adapter.read_text(encoding="utf-8"), original_adapter)
-
-    def test_invalid_executable_adapter_is_reported_without_aborting_collection(self):
-        root = self.make_root()
-        (root / "app.py").write_text("print('ok')\n", encoding="utf-8")
-        adapters = root / ".assure" / "adapters"
-        adapters.mkdir(parents=True)
-        adapter = adapters / "invalid_adapter"
-        adapter.write_text("this is not an executable script\n", encoding="utf-8")
-
-        try:
-            result = collect_inventory(root)
-        except OSError as exc:
-            self.fail(f"collection must report invalid adapters instead of raising: {exc}")
-
-        self.assertEqual(result["changed_files"], ["app.py"])
-        self.assertEqual(result["adapter_failures"][0]["adapter"], "invalid_adapter")
-        self.assertTrue(result["adapter_failures"][0]["reason"])
-        self.assertTrue((root / ".assure" / "discovery-index.json").exists())
-        self.assertTrue((root / ".assure" / "cache" / "file-hashes.json").exists())
-
-    def test_non_utf8_adapter_output_is_reported_without_aborting_collection(self):
-        root = self.make_root()
-        (root / "app.py").write_text("print('ok')\n", encoding="utf-8")
-        adapters = root / ".assure" / "adapters"
-        adapters.mkdir(parents=True)
-        adapter = adapters / "non_utf8_adapter.py"
-        adapter.write_text(
-            "#!" + sys.executable + "\n"
-            "import sys\n"
-            "sys.stdout.buffer.write(b'\\xff')\n",
-            encoding="utf-8",
-        )
-
-        try:
-            result = collect_inventory(root)
-        except UnicodeDecodeError as exc:
-            self.fail(f"collection must report non-UTF-8 adapter output instead of raising: {exc}")
-
-        self.assertEqual(result["changed_files"], ["app.py"])
-        self.assertEqual(result["adapter_failures"][0]["adapter"], "non_utf8_adapter.py")
-        self.assertEqual(result["adapter_failures"][0]["reason"], "invalid JSON: adapter output is not UTF-8")
-        self.assertTrue((root / ".assure" / "discovery-index.json").exists())
-        self.assertTrue((root / ".assure" / "cache" / "file-hashes.json").exists())
+        self.assertEqual(result["adapter_items"], [])
+        self.assertEqual(result["adapter_failures"][0]["adapter"], adapter.name)
+        self.assertIn("disabled", result["adapter_failures"][0]["reason"])
+        self.assertFalse(marker.exists())
 
     def test_direct_cli_runs_without_site_packages(self):
         root = self.make_root()

@@ -33,36 +33,54 @@ Assure-owned functional probe:
 ```yaml
 mode: automated
 strategy: functional-probe
+probe:
+  entry_points: [src/auth/login.ts#login]
+  cases: [success, failure, boundary]
+  assertions: [result, side-effects]
 tests:
   - runner: vitest
     args: [run, .assure/probes/auth/login.assure.test.ts]
     selector: accepts valid credentials and rejects invalid credentials
+    sha256: <sha256-of-probe-file>
 ```
 
 Store functional probes only under `.assure/probes/`. Assure copies that
 directory into its temporary execution snapshot; it does not copy other
-`.assure` state. A probe must execute product behavior, cover at least a
-success or rejection path appropriate to the scenario, and assert observable
-output or state. Static source inspection is not an automated verification.
+`.assure` state. Every entry point uses `<project-relative-file>#<symbol>`.
+A probe must execute product behavior, cover success, failure, and boundary
+cases, and assert both the observable result and outbound side effects.
+Placeholder files and static source inspection are not automated verification.
+Record the SHA-256 of every functional probe test file. Approval and execution
+must fail if a probe changes without remapping.
 
 Manual verification requires a non-empty `instructions` list and is reserved
 for physical, perceptual, legal, or human-consent outcomes that cannot be
 represented by controlled input and observable output. A missing external
 service or optional helper does not qualify. Excluded verification requires
-`reason`, `approved_by`, and `approved_at`. Uncovered verification has no
-additional fields.
+`reason`, `approved_by`, and `approved_at`.
 
-## Project adapter contract
+An uncovered scenario requires evidence that Assure attempted its own probe:
 
-An adapter under `.assure/adapters/` must:
+```yaml
+mode: uncovered
+probe_attempt:
+  entry_points: [native/sensor.ts#readSensor]
+  strategies: [direct-call, boundary-spy]
+  blocker: cannot-observe-outcome
+  reason: The outcome requires physical sensor behavior.
+```
 
-- be a Python file or executable and accept `--project <absolute-project-root>`;
-- treat the project working directory and product source as read-only;
-- exit `0` and write one UTF-8 JSON object to stdout;
-- include `items` and `failures` arrays in that object.
+Allowed blocker codes are `cannot-observe-outcome`, `no-executable-boundary`,
+`unsafe-boundary`, and `unsupported-runner`. Missing Docker, an emulator, a
+browser driver, a test account, or an external service is not by itself a
+valid blocker.
 
-Use `items` for discovered structures. Use `failures` for structures the
-adapter cannot resolve. On nonzero exit, write a concise reason to stderr.
+## Discovery extensions
+
+Project-provided discovery adapters are not executed. Assure uses only its
+built-in deterministic collectors so repository code cannot extend or replace
+the verification workflow. Record unsupported dynamic structures as unresolved
+scope; unresolved scope keeps the baseline unapproved.
 
 Complete example:
 
@@ -99,4 +117,9 @@ sections:
         risk: critical
         verification:
           mode: uncovered
+          probe_attempt:
+            entry_points: [native/secure-session.ts#readExpiredSession]
+            strategies: [direct-call, boundary-spy]
+            blocker: cannot-observe-outcome
+            reason: The outcome depends on device-controlled secure storage.
 ```

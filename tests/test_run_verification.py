@@ -93,7 +93,11 @@ class VerificationRunnerTests(unittest.TestCase):
         assure.mkdir(exist_ok=True)
         manifest = {
             "schema_version": 1,
-            "baseline": {"status": "approved", "commit": commit},
+            "baseline": {
+                "status": "approved",
+                "commit": commit,
+                "verification_policy": "functional-probes-v1",
+            },
             "sections": [{
                 "id": "auth",
                 "name": "인증",
@@ -462,6 +466,41 @@ class VerificationRunnerTests(unittest.TestCase):
             execute_manifest(root, manifest_path)
 
         self.assertFalse(marker.exists())
+
+    def test_functional_probe_policy_is_enforced_before_execution(self):
+        root, commit = self.make_repo()
+        manifest_path = self.write_manifest(
+            root,
+            commit,
+            [{
+                "id": "auth.login",
+                "name": "로그인",
+                "risk": "critical",
+                "verification": {"mode": "uncovered"},
+            }],
+        )
+
+        with self.assertRaisesRegex(
+            AssureError,
+            "uncovered scenario has no probe_attempt evidence",
+        ):
+            execute_manifest(root, manifest_path)
+
+    def test_missing_functional_probe_policy_is_rejected_before_execution(self):
+        root, commit = self.make_repo()
+        manifest_path = self.write_manifest(root, commit, [])
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        del manifest["baseline"]["verification_policy"]
+        manifest_path.write_text(
+            yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(
+            AssureError,
+            "verification_policy must be functional-probes-v1",
+        ):
+            execute_manifest(root, manifest_path)
 
     def test_cli_returns_zero_with_json_for_releasable_result(self):
         root, commit = self.make_repo()

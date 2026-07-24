@@ -32,18 +32,56 @@ the product-owned behavior and replace only the unsafe boundary.
    data, wall-clock timing, and external availability.
 7. Prove sensitivity with a controlled mutation in an isolated workspace, then
    restore the mutation.
+8. Record `probe.entry_points`, all three `probe.cases`, and both
+   `probe.assertions` in the manifest. Use `<project-relative-file>#<symbol>`
+   for every entry point.
 
 An in-memory fake may model a boundary's documented contract, but it must not
 reimplement the product decision being tested. For example, fake user lookup
 may return a controlled user; the real login code must still decide whether
 the supplied credential is accepted and whether a session is created.
 
+## Isolate and record outbound effects
+
+Represent outbound observations consistently across runners:
+
+```text
+effect:
+  kind: database-write
+  target: users/session
+  operation: create
+  payload: controlled value
+  count: 1
+  blocked: true
+```
+
+Use only an adapter implemented and validated by Assure. Current automatic
+boundary replacement covers Firebase, fetch, WebSocket, and Node HTTP/HTTPS
+under Vitest, while preserving a compatible Vitest Firebase mock. Jest and
+pytest outbound boundaries currently have no built-in adapter and must fail
+closed as uncovered. Do not invent an unvalidated adapter during mapping. An
+adapter may supply a controlled boundary response and record effects; it must
+not reproduce product decisions.
+
+Treat execution providers and boundary adapters as separate layers:
+
+- Docker or Podman with `network none` provides `os-blocked` assurance.
+- Current macOS `local-isolated` uses `sandbox-exec` for `os-blocked`
+  filesystem-write and network isolation.
+- Never label runtime guards as OS-level isolation.
+- Never execute automated checks with runtime guards alone. If neither a
+  container nor supported OS isolation exists, report the check as uncovered.
+- If no built-in safe runner adapter or supported project mock covers a
+  detected outbound boundary, do not execute the scenario. Record the boundary
+  and blocker as uncovered evidence.
+
 ## Classify the result
 
 - Use `automated` only when the probe executes product behavior and asserts an
   observable outcome.
 - Use `uncovered` when no safe executable boundary can be reached or the probe
-  cannot distinguish correct from incorrect behavior.
+  cannot distinguish correct from incorrect behavior. Record every attempted
+  entry point and strategy, a supported blocker code, and a concrete reason.
 - Use `manual` only for outcomes that fundamentally require physical hardware,
   human perception or consent, or a legally controlled real-world action.
 - Never use missing Docker, an emulator, a browser driver, a test account, or
@@ -51,3 +89,7 @@ the supplied credential is accepted and whether a session is created.
 
 Static analysis, configuration inspection, and type checking can support probe
 construction, but cannot alone produce a passing functional result.
+
+Before approval, run `scripts/assure_probe_policy.py --project <root>`. Treat
+every validator error as required mapping work. Policy metadata without a
+successful validator result is not an approved functional-probe baseline.

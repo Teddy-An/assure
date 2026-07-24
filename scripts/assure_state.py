@@ -13,6 +13,7 @@ if __package__:
         source_snapshot,
     )
     from .assure_output import emit_json
+    from .assure_probe_policy import validate_probe_policy
 else:
     from assure_common import (
         AssureError,
@@ -22,6 +23,7 @@ else:
         source_snapshot,
     )
     from assure_output import emit_json
+    from assure_probe_policy import validate_probe_policy
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,16 @@ def classify_project(project_root: Path) -> ProjectState:
         return ProjectState(status, **base, reason=f"baseline status is {status}")
     if status != "approved":
         return ProjectState("damaged", **base, reason=f"unknown baseline status: {status}")
+    policy_validation = validate_probe_policy(manifest, root)
+    if not policy_validation.valid:
+        return ProjectState(
+            "approved-stale",
+            **base,
+            reason=(
+                "functional probe policy requires remapping: "
+                + "; ".join(policy_validation.errors)
+            ),
+        )
     baseline_commit = manifest["baseline"].get("commit")
     if not isinstance(baseline_commit, str) or not baseline_commit:
         return ProjectState("damaged", **base, reason="approved baseline commit is missing")

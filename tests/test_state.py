@@ -33,6 +33,7 @@ class ProjectStateTests(unittest.TestCase):
         (assure / "verification-manifest.yaml").write_text(
             "schema_version: 1\nbaseline:\n"
             f"  status: approved\n  commit: {commit}\n  source_snapshot: {snapshot}\n"
+            "  verification_policy: functional-probes-v1\n"
             "sections: []\n",
             encoding="utf-8",
         )
@@ -58,6 +59,54 @@ class ProjectStateTests(unittest.TestCase):
         ).strip()
         self.write_approved_manifest(root, commit, source_snapshot(root))
         self.assertEqual(classify_project(root).kind, "approved-current")
+
+    def test_approved_stale_when_functional_probe_policy_is_missing(self):
+        root = self.make_repo()
+        commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        assure = root / ".assure"
+        assure.mkdir()
+        (assure / "verification-manifest.yaml").write_text(
+            "schema_version: 1\nbaseline:\n"
+            f"  status: approved\n  commit: {commit}\n"
+            f"  source_snapshot: {source_snapshot(root)}\n"
+            "sections: []\n",
+            encoding="utf-8",
+        )
+
+        state = classify_project(root)
+
+        self.assertEqual(state.kind, "approved-stale")
+        self.assertIn("verification_policy", state.reason)
+
+    def test_approved_stale_when_uncovered_has_no_probe_attempt(self):
+        root = self.make_repo()
+        commit = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+        ).strip()
+        self.write_approved_manifest(root, commit, source_snapshot(root))
+        path = root / ".assure" / "verification-manifest.yaml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "sections: []",
+                "sections:\n"
+                "  - id: auth\n"
+                "    name: Authentication\n"
+                "    scenarios:\n"
+                "      - id: auth.login\n"
+                "        name: Login\n"
+                "        risk: critical\n"
+                "        verification:\n"
+                "          mode: uncovered",
+            ),
+            encoding="utf-8",
+        )
+
+        state = classify_project(root)
+
+        self.assertEqual(state.kind, "approved-stale")
+        self.assertIn("no probe_attempt evidence", state.reason)
 
     def test_approved_current_with_uncommitted_files_matching_snapshot(self):
         root = self.make_repo()
@@ -182,7 +231,9 @@ class ProjectStateTests(unittest.TestCase):
         assure.mkdir()
         (assure / "verification-manifest.yaml").write_text(
             "schema_version: 1\nbaseline:\n  status: approved\n"
-            "  commit: 0000000000000000000000000000000000000000\nsections: []\n",
+            "  commit: 0000000000000000000000000000000000000000\n"
+            "  verification_policy: functional-probes-v1\n"
+            "sections: []\n",
             encoding="utf-8",
         )
         self.assertEqual(classify_project(root).kind, "damaged")
