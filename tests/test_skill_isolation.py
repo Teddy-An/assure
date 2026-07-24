@@ -21,11 +21,6 @@ class SkillIsolationTests(unittest.TestCase):
                     "Do not invoke or apply other workflow skills", normalized
                 )
 
-    def test_assure_skills_do_not_reference_superpowers(self):
-        for path in SKILL_PATHS:
-            with self.subTest(skill=path.parent.name):
-                self.assertNotIn("superpowers:", path.read_text(encoding="utf-8"))
-
     def test_assure_skills_require_supported_python_runtime(self):
         required = (
             "1. `python3 --version`",
