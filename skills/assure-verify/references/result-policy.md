@@ -35,8 +35,20 @@ All `O` results and properly approved exclusions produce `releasable`.
 1. Verdict
 2. Metadata table: environment, baseline commit, project root, report path
 3. Status-count table
-4. Complete scenario result table
-5. Artifact directory
+4. Feature-scenario result tree
+5. Complete scenario result table
+6. Artifact directory
+
+Render the tree in manifest order inside a fenced `text` block:
+
+```text
+Authentication (2)
+├─ Passed  Valid login
+└─ Failed  Invalid login rejection
+```
+
+Use localized result labels. Keep IDs, risk, mode, and detail in the complete
+table only.
 
 Show each scenario exactly once. Summarize blocking and unresolved results in
 the verdict and status-count table instead of repeating those rows separately.

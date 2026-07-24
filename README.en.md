@@ -86,6 +86,16 @@ Release verdict: blocked
 | Confirm | 2 |
 | Unverified | 1 |
 
+Feature verification structure
+
+Authentication (2)
+├─ Failed  Sign in with valid credentials
+└─ Passed  Reject invalid credentials
+
+Data persistence (2)
+├─ Passed  Write valid input exactly once
+└─ Unverified  Block unauthorized writes
+
 | No. | Risk | Section | ID | Scenario | Mode | Result | Detail |
 |---:|---|---|---|---|---|---|---|
 | 1 | critical | Authentication | `authentication.login` | Sign in with valid credentials | Automated | Failed | Exit code 1 |
