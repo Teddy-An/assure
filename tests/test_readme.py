@@ -49,6 +49,20 @@ class ReadmeTests(unittest.TestCase):
         self.assertIn("Assure-owned functional probe", english)
         self.assertIn("valid, invalid, and boundary inputs", english)
 
+    def test_readme_uses_human_result_labels_without_internal_symbols(self):
+        korean = README.read_text(encoding="utf-8")
+        english = README_EN.read_text(encoding="utf-8")
+        for value in ("| 통과 |", "| 실패 |", "| 확인 |", "| 미검증 |", "| 제외 |"):
+            with self.subTest(value=value):
+                self.assertIn(value, korean)
+        for value in ("| Passed |", "| Failed |", "| Confirm |", "| Unverified |", "| Excluded |"):
+            with self.subTest(value=value):
+                self.assertIn(value, english)
+        for value in ("| `O` |", "| `X` |", "| `👁` |", "| `?` |", "| `—` |"):
+            with self.subTest(value=value):
+                self.assertNotIn(value, korean)
+                self.assertNotIn(value, english)
+
 
 if __name__ == "__main__":
     unittest.main()

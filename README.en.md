@@ -88,19 +88,19 @@ Release verdict: blocked
 
 | No. | Risk | Section | ID | Scenario | Mode | Result | Detail |
 |---:|---|---|---|---|---|---|---|
-| 1 | critical | Payments | `payments.refund-idempotency` | Refunds are idempotent | Automated | Failed | Exit code 1 |
-| 2 | critical | Security | `security.admin-access` | Confirm administrator access | Manual | Confirm | Confirmation pending |
+| 1 | critical | Authentication | `authentication.login` | Sign in with valid credentials | Automated | Failed | Exit code 1 |
+| 2 | high | Interface | `interface.visual-review` | Review the visual quality of key screens | Manual | Confirm | Reviewer confirmation pending |
 ```
 
-Each scenario has one of these states:
+Each scenario has one of these results:
 
-| Status | Meaning |
+| Result | Meaning |
 |---|---|
-| `O` | Automated verification passed or a manual check was confirmed |
-| `X` | Verification failed |
-| `👁` | Manual confirmation is pending |
-| `?` | Environment, permission, data, or missing coverage prevented a conclusion |
-| `—` | Explicitly excluded with a reason and approver |
+| Passed | Automated verification passed or a reviewer confirmed a manual check |
+| Failed | Verification failed |
+| Confirm | Human confirmation is required and remains pending |
+| Unverified | Environment, permission, data, or missing coverage prevented a conclusion |
+| Excluded | Removed from verification with a recorded reason and approver |
 
 The final verdict is `releasable`, `blocked`, `approval-required`, or `warning`
 according to scenario risk and unresolved evidence.
