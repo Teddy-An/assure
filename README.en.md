@@ -245,9 +245,9 @@ Functional probe
 │  ├─ Required calls, writes, and events
 │  └─ Forbidden calls, writes, and events
 ├─ Runner adapter
-│  ├─ Vitest: vi.mock and setup
-│  ├─ Jest: jest.mock and setup
-│  ├─ pytest: fixtures and monkeypatch
+│  ├─ Vitest: built-in vi.mock and setup
+│  ├─ Jest: project mock or dedicated jest.mock and setup
+│  ├─ pytest: project fixture or dedicated monkeypatch
 │  └─ Other: project mock or Assure-owned adapter
 ├─ Runtime guard
 │  ├─ Stripped credentials

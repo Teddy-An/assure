@@ -244,9 +244,9 @@ fail-closed로 대체하며, 안전한 대체를 만들 수 없는 외부 접근
 │  ├─ 필요한 호출·쓰기·이벤트
 │  └─ 금지된 호출·쓰기·이벤트
 ├─ runner adapter
-│  ├─ Vitest: vi.mock·setup
-│  ├─ Jest: jest.mock·setup
-│  ├─ pytest: fixture·monkeypatch
+│  ├─ Vitest: 내장 vi.mock·setup
+│  ├─ Jest: 프로젝트 mock 또는 전용 jest.mock·setup
+│  ├─ pytest: 프로젝트 fixture 또는 전용 monkeypatch
 │  └─ 기타: 프로젝트 mock 또는 Assure 전용 adapter
 ├─ runtime guard
 │  ├─ 자격증명 제거
