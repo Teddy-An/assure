@@ -73,17 +73,17 @@ existing defect, Assure reports it as verification evidence.
 ```text
 Release verdict: blocked
 
-| Status | Count |
+| Result | Count |
 |---|---:|
-| O | 18 |
-| X | 1 |
-| 👁 | 2 |
-| ? | 1 |
+| Passed | 18 |
+| Failed | 1 |
+| Confirm | 2 |
+| Unverified | 1 |
 
-| Status | Risk | Section | ID | Scenario | Mode | Result / detail |
-|---|---|---|---|---|---|---|
-| X | critical | Payments | `payments.refund-idempotency` | Refunds are idempotent | automated | Failed |
-| 👁 | critical | Security | `security.admin-access` | Confirm administrator access | manual | Confirmation pending |
+| No. | Risk | Section | ID | Scenario | Mode | Result | Detail |
+|---:|---|---|---|---|---|---|---|
+| 1 | critical | Payments | `payments.refund-idempotency` | Refunds are idempotent | Automated | Failed | Exit code 1 |
+| 2 | critical | Security | `security.admin-access` | Confirm administrator access | Manual | Confirm | Confirmation pending |
 ```
 
 Each scenario has one of these states:

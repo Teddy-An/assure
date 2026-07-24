@@ -72,9 +72,14 @@ class OutputTests(unittest.TestCase):
             "artifact_directory": "/tmp/artifacts",
         })
         self.assertIn("| 항목 | 결과 |", report)
-        self.assertIn("| 상태 | 개수 |", report)
+        self.assertIn("| 결과 | 개수 |", report)
         self.assertIn(
-            "| 상태 | 위험도 | 영역 | ID | 검증 항목 | 방식 | 결과 / 비고 |",
+            "| 번호 | 위험도 | 영역 | ID | 검증 항목 | 방식 | 결과 | 상세 |",
+            report,
+        )
+        self.assertIn(
+            "| 1 | critical | 결제 | `payments.refund` | "
+            "환불 \\| 중복 방지 | 자동 | 실패 |",
             report,
         )
         self.assertIn("환불 \\| 중복 방지", report)

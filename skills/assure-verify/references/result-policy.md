@@ -41,5 +41,15 @@ All `O` results and properly approved exclusions produce `releasable`.
 
 Keep the scenario columns stable:
 
-| Status | Risk | Section | ID | Scenario | Mode | Result / detail |
-|---|---|---|---|---|---|---|
+| No. | Risk | Section | ID | Scenario | Mode | Result | Detail |
+|---:|---|---|---|---|---|---|---|
+
+Translate internal status codes for human-facing tables:
+
+| Internal | English | Korean |
+|---|---|---|
+| `O` | Passed | 통과 |
+| `X` | Failed | 실패 |
+| `?` | Unverified | 미검증 |
+| `👁` | Confirm | 확인 |
+| `—` | Excluded | 제외 |

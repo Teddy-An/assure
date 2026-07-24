@@ -348,10 +348,6 @@ def _markdown_cell(value: Any) -> str:
 def _result_detail(result: dict[str, Any], language: str) -> str:
     details: list[str] = []
     if result.get("mode") == "automated":
-        if result["status"] == "O":
-            details.append(localize("report.passed", language))
-        else:
-            details.append(localize("report.failed", language))
         if result.get("exit_code") is not None:
             details.append(
                 localize(
@@ -365,34 +361,57 @@ def _result_detail(result: dict[str, Any], language: str) -> str:
     if result.get("reason"):
         details.append(str(result["reason"]))
     details.extend(str(item) for item in result.get("instructions", []))
+    if not details and result["status"] == "?":
+        details.append(localize("report.no_coverage", language))
     return "<br>".join(
         item.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
         for item in details
     ) or "—"
 
 
-def _result_table(results: list[dict[str, Any]], language: str) -> list[str]:
+def _display_result(status: str, language: str) -> str:
+    keys = {
+        "O": "report.result_passed",
+        "X": "report.result_failed",
+        "?": "report.result_unverified",
+        "👁": "report.result_confirm",
+        "—": "report.result_excluded",
+    }
+    return localize(keys[status], language)
+
+
+def _display_mode(mode: str, language: str) -> str:
+    return localize(f"report.mode_{mode}", language)
+
+
+def _result_table(
+    results: list[dict[str, Any]],
+    language: str,
+    positions: dict[str, int],
+) -> list[str]:
     headings = [
-        localize("report.status", language),
+        localize("report.number", language),
         localize("report.risk", language),
         localize("report.section", language),
         localize("report.id", language),
         localize("report.scenario", language),
         localize("report.mode", language),
-        localize("report.result_detail", language),
+        localize("report.result", language),
+        localize("report.detail", language),
     ]
     lines = [
         "| " + " | ".join(headings) + " |",
-        "|---|---|---|---|---|---|---|",
+        "|---:|---|---|---|---|---|---|---|",
     ]
     for result in results:
         values = [
-            result["status"],
+            positions[result["id"]],
             result["risk"],
             result["section"],
             f"`{result['id']}`",
             result["name"],
-            result["mode"],
+            _display_mode(result["mode"], language),
+            _display_result(result["status"], language),
             _result_detail(result, language),
         ]
         lines.append("| " + " | ".join(_markdown_cell(item) for item in values) + " |")
@@ -416,13 +435,13 @@ def render_report(summary: dict[str, Any]) -> str:
         "",
         f"## {localize('report.summary', language)}",
         "",
-        f"| {localize('report.status', language)} | {localize('report.count', language)} |",
+        f"| {localize('report.result', language)} | {localize('report.count', language)} |",
         "|---|---:|",
-        f"| O | {counts.get('O', 0)} |",
-        f"| X | {counts.get('X', 0)} |",
-        f"| 👁 | {counts.get('👁', 0)} |",
-        f"| ? | {counts.get('?', 0)} |",
-        f"| — | {counts.get('—', 0)} |",
+        f"| {_display_result('O', language)} | {counts.get('O', 0)} |",
+        f"| {_display_result('X', language)} | {counts.get('X', 0)} |",
+        f"| {_display_result('👁', language)} | {counts.get('👁', 0)} |",
+        f"| {_display_result('?', language)} | {counts.get('?', 0)} |",
+        f"| {_display_result('—', language)} | {counts.get('—', 0)} |",
         "",
         f"## {localize('report.unresolved', language)}",
         "",
@@ -432,12 +451,16 @@ def render_report(summary: dict[str, Any]) -> str:
         for result in summary["results"]
         if result["status"] in {"X", "👁", "?"}
     ]
+    positions = {
+        result["id"]: index
+        for index, result in enumerate(summary["results"], start=1)
+    }
     if not unresolved:
         lines.append(localize("report.none", language))
     else:
-        lines.extend(_result_table(unresolved, language))
+        lines.extend(_result_table(unresolved, language, positions))
     lines.extend(["", f"## {localize('report.all_results', language)}", ""])
-    lines.extend(_result_table(summary["results"], language))
+    lines.extend(_result_table(summary["results"], language, positions))
     lines.extend([
         "",
         f"## {localize('report.artifact_directory', language)}",

@@ -53,11 +53,15 @@ discovery; continue only after `<python-command>` is selected.
    not files to read.
 6. Present the verdict first. Then use Markdown tables for:
    - baseline commit, project root, execution provider, and report path;
-   - status counts for `O`, `X`, `👁`, `?`, and `—`;
-   - every scenario with status, risk, section, ID, name, mode, and a compact
-     result or reason.
+   - result counts using localized labels, never raw status symbols;
+   - every scenario with number, risk, section, ID, name, mode, localized
+     result, and detail.
    Put blocking and unresolved rows before the complete result table. Keep
-   manual instructions in the result/reason cell with `<br>` separators.
+   manual instructions in the detail cell with `<br>` separators. Map `O` to
+   Passed/통과, `X` to Failed/실패, `?` to Unverified/미검증, `👁` to
+   Confirm/확인, and `—` to Excluded/제외. Never expose the raw symbols as
+   the user-facing result. Preserve each scenario's complete-table row number
+   in the unresolved table.
    Do not replace the complete table with prose or a partial bullet list.
 7. Manual checks never pause the initial run. Report them together as pending.
    When the user later responds, accept only an explicit `confirmed`, `failed`,

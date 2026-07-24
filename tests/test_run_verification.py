@@ -221,8 +221,8 @@ class VerificationRunnerTests(unittest.TestCase):
         self.assertIn("secret-success-log", artifact.read_text(encoding="utf-8"))
         report = Path(result["report"]).read_text(encoding="utf-8")
         saved_summary = Path(result["summary_path"]).read_text(encoding="utf-8")
-        self.assertIn("| Status | Risk | Section | ID |", report)
-        self.assertIn("passed<br>exit code: `0`<br>", report)
+        self.assertIn("| No. | Risk | Section | ID |", report)
+        self.assertIn("| Automated | Passed | exit code: `0`<br>", report)
         self.assertNotIn("secret-success-log", report)
         self.assertNotIn("secret-success-log", saved_summary)
 
