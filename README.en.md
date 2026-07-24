@@ -82,6 +82,13 @@ execute a boundary that cannot be replaced safely.
    consent-dependent outcomes.
 10. **Regress the complete baseline**: Run every approved feature scenario, not
    only changed files, to detect effects on other functionality.
+11. **Prepare first, require explicit approval**: Before any scenario runs,
+   check isolation permissions and runner readiness. If verification needs a
+   dependency download or install, a functional probe, another new file, or
+   additional permission, show the target, reason, and impact and wait for
+   an explicit choice. Run no scenario before that choice. On decline, record
+   affected scenarios and the lost coverage as Unverified and continue with
+   the remaining workflow.
 
 ### Isolation from other workflows
 
@@ -103,8 +110,8 @@ installed plugin.
 
 | Level | Applied controls |
 |---|---|
-| Enforced by code | Temporary copy, original read/write protection, credential stripping, OS network denial, runner allowlist, outbound fail-closed checks, probe hashes, complete-baseline execution, verdict policy |
-| Enforced by skill workflow | Behavior-first reverse tracing, existing-test mapping, minimal probe design, token and duplicate-work minimization |
+| Enforced by code | Temporary copy, original read/write protection, credential stripping, OS network denial, pre-execution permission checks, refusal of unapproved dependency preparation, runner allowlist, outbound fail-closed checks, probe hashes, complete-baseline execution, verdict policy |
+| Enforced by skill workflow | Explain preparation targets, reasons, and impact and obtain user approval; behavior-first reverse tracing, existing-test mapping, minimal probe design, token and duplicate-work minimization |
 | Higher-priority boundary | Stop Assure and report a conflict when system, developer, user, or project instructions are incompatible |
 
 Safety does not rely on skill prose alone. Deterministic scripts recheck
@@ -135,7 +142,9 @@ User request
                            │  └─ Map existing test        │
                            │                              │
                            └─ Existing test is insufficient
-                              └─ Create Assure probe
+                              └─ Explain files and impact
+                                 └─ Obtain user approval
+                                    └─ Create Assure probe
                                  ├─ Success input
                                  ├─ Failure input
                                  ├─ Boundary input
@@ -155,6 +164,15 @@ User request
                                     └─ Approve baseline and snapshot
                                                         │
    ┌────────────────────────────────────────────────────┘
+   └─ Preflight verification preparation
+      ├─ Write and remove an internal temporary file
+      ├─ Confirm outside writes and network are blocked
+      ├─ Check runner, dependencies, and permissions
+      └─ Download, install, or creation required
+         ├─ No → continue
+         └─ Yes → explain target, reason, and impact
+                   ├─ Approve → perform approved preparation
+                   └─ Decline → mark affected checks Unverified
    └─ Execute every approved scenario
       └─ Select execution provider
          ├─ Docker or Podman available → stronger isolation
@@ -184,16 +202,25 @@ Open a project in Codex and ask:
 Run Assure for this project.
 ```
 
-Assure automatically follows the workflow required by the project state:
+Assure follows the workflow required by the project state, but pauses before
+preparation that needs new files, dependencies, or permissions:
+
+The prompt shows the detected stack, test runner, lockfile evidence, exact
+command, reason, and impact. Use a native Approve/Decline picker when the host
+provides one; otherwise the user can enter `1` or `2`. Empty input is never
+approval. Declining skips the affected automatic checks, records them as
+Unverified, and continues the report.
 
 1. Inspect the project structure and test environment.
 2. Organize user scenarios by product feature.
 3. Map existing tests before generating anything.
 4. Derive valid, invalid, and boundary inputs and expected outcomes.
-5. Create project-specific functional probes under `.assure/probes/`.
+5. Explain planned `.assure/` files and probes, obtain approval, then create
+   them.
 6. Block unsafe external connections and record attempted effects.
 7. Record the current source snapshot as the verification baseline.
-8. Run the complete automated population in the isolated copy.
+8. Preflight isolation permissions, temporary paths, and runners; obtain any
+   required download or install approval; then run the complete population.
 9. Report only irreducibly human and uncovered items.
 10. Return a release verdict.
 
@@ -244,7 +271,10 @@ Assure's safety principles apply to every execution provider.
 - Run automated checks from an Assure-owned temporary project copy.
 - Never run tests from the original working tree or edit production code.
 - Do not copy or inherit `.env` files, cloud credentials, or private keys.
-- Prepare lockfile-pinned dependencies only inside the temporary copy.
+- Preflight internal temporary writes and cleanup plus outside-write and
+  network denial before scenario execution.
+- Prepare lockfile-pinned dependencies only inside the temporary copy and only
+  after explaining the action and receiving explicit user approval.
 - Disable package lifecycle scripts and binary links.
 - Execute only supported test runners with validated argument arrays.
 - Block ordinary network access during test execution.

@@ -19,12 +19,23 @@ from scripts.run_verification import execute_manifest, record_manual_result, run
 class LocalTestSandbox:
     provider = "test"
     network = "disabled"
+    is_container = False
 
     def __init__(self, root: Path):
         self.root = root
 
     def bootstrap(self, runners: set[str]) -> BootstrapResult:
         return BootstrapResult("ready", "test dependencies")
+
+    def preflight(self, runners=None) -> None:
+        pass
+
+    def required_preparations(
+        self,
+        runners: set[str],
+        approved: set[str],
+    ) -> list[dict[str, str]]:
+        return []
 
     def wrap(self, argv: list[str], runner: str) -> list[str]:
         if runner == "pytest":
@@ -253,6 +264,62 @@ class VerificationRunnerTests(unittest.TestCase):
             "large-private-log",
             Path(result["report"]).read_text(encoding="utf-8"),
         )
+
+    def test_runner_permission_failure_before_test_collection_is_unverified(self):
+        root, commit = self.make_repo()
+        manifest = self.make_manifest(
+            root,
+            commit,
+            self.python_command(
+                root,
+                "print('(0 test)')\n"
+                "print('Error: EPERM: operation not permitted, mkdir temp/ssr')\n"
+                "raise SystemExit(1)\n",
+            ),
+        )
+
+        result = execute_manifest(root, manifest)
+
+        verification = result["results"][0]
+        self.assertEqual(verification["status"], "?")
+        self.assertIn("no product test executed", verification["reason"])
+
+    def test_declined_preparation_skips_execution_and_reports_unverified(self):
+        root, commit = self.make_repo()
+        marker = root / ".assure" / "must-not-run"
+        manifest = self.make_manifest(
+            root,
+            commit,
+            self.python_command(
+                root,
+                f"from pathlib import Path\nPath({str(marker)!r}).touch()\n",
+            ),
+        )
+
+        class RequiredPreparationSandbox(LocalTestSandbox):
+            def required_preparations(self, runners, approved):
+                if "dependency-download" in approved:
+                    return []
+                return [{
+                    "id": "dependency-download",
+                    "action": "prepare dependencies",
+                    "impact": "temporary copy only",
+                }]
+
+        with patch(
+            "scripts.run_verification.prepare_sandbox",
+            side_effect=lambda project: RequiredPreparationSandbox(project),
+        ):
+            result = execute_manifest(
+                root,
+                manifest,
+                declined_preparations={"dependency-download"},
+            )
+
+        self.assertFalse(marker.exists())
+        self.assertEqual(result["results"][0]["status"], "?")
+        self.assertEqual(result["bootstrap"]["status"], "declined")
+        self.assertIn("user declined", result["results"][0]["reason"])
 
     def test_timeout_terminates_child_process_before_it_can_write_a_marker(self):
         root = Path(tempfile.mkdtemp())

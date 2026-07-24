@@ -48,7 +48,10 @@ discovery; continue only after `<python-command>` is selected.
    `<python-command> <assure-root>/scripts/detect_environment.py --project <root>` before
    reading source files.
 3. Record detected stack, exclusions, unsupported structures, scan kind, and
-   bounded estimate for the final report. Continue automatically.
+   a bounded estimate. Before creating or changing the manifest, cache,
+   discovery index, probes, or other `.assure/` files, show the exact planned
+   paths, purpose, and impact and obtain explicit user approval. Do not infer
+   approval from the original Assure request.
 4. Use only Assure's built-in deterministic collectors. Never create or execute
    project-provided discovery adapters. Record unsupported dynamic structures
    as unresolved scope instead of importing an external discovery workflow.
@@ -135,6 +138,6 @@ an executable software behavior as manual or uncovered.
 - Setting `functional-probes-v1` without a successful policy-validator result
 - Leaving an uncovered scenario without structured probe-attempt evidence
 - Calling a draft or partial list complete
-- Pausing for routine approval instead of returning a result
+- Creating or changing `.assure/` files before explicit preparation approval
 
 Any red flag means stop and return to the relevant workflow step.

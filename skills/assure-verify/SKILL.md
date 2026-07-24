@@ -49,17 +49,37 @@ discovery; continue only after `<python-command>` is selected.
 2. Parse the state JSON. Continue for `approved-current`; otherwise route
    automatically to `$assure:assure-map` and resume verification afterward.
 3. Run
-   `<python-command> <assure-root>/scripts/run_verification.py --project <root>` once.
+   `<python-command> <assure-root>/scripts/run_verification.py --project <root>`
+   as a preparation gate. This performs isolation preflight before scenarios.
+   If stdout reports `preparation-required`, present each requested download,
+   installation, creation, or permission with the detected project stack,
+   runner, evidence file, exact command, reason, scope, and impact. Prefer a
+   native two-choice selection UI when the host provides one. Otherwise show:
+   `1. Approve — prepare and run` and
+   `2. Decline — mark affected scenarios Unverified and continue`.
+   Accept `1` or any unambiguous affirmative response as approval and `2` or
+   any unambiguous negative response as decline. Empty input is never approval.
+   Do not infer approval from the original Assure request.
+4. After approval, rerun once with
+   `--approve-preparation <requirement-id>` for every approved requirement.
+   After decline, rerun with
+   `--decline-preparation <requirement-id>` for every declined requirement;
+   explain which scenarios cannot run, mark them Unverified, and continue to
+   the complete report.
+   If no approval is required, the preparation-gate call continues directly
+   into verification. Never execute a scenario before the gate passes.
    Do not execute scenario commands individually from the conversation.
    Never run from the original tree, inherit production credentials, or permit
    production data or service access.
-4. Parse only the command's stdout JSON summary. A nonzero exit for `blocked`
+5. Parse only the command's stdout JSON summary. Exit code `3` with
+   `preparation-required` means no scenario ran and requires a user decision.
+   A nonzero exit for `blocked`
    or `approval-required` is a verification result, not permission to inspect
    other evidence.
-5. Never open files under `.assure/artifacts/` or any artifact, report, or
+6. Never open files under `.assure/artifacts/` or any artifact, report, or
    summary path returned by the JSON. Artifact paths are identifiers to report,
    not files to read.
-6. Present the verdict first. Then use Markdown tables for:
+7. Present the verdict first. Then use Markdown tables for:
    - baseline commit, project root, execution provider, and report path;
    - exact network assurance: `os-blocked`, `runtime-guarded`, or `not-run`;
    - result counts using localized labels, never raw status symbols;
@@ -74,19 +94,19 @@ discovery; continue only after `<python-command>` is selected.
    the user-facing result.
    Do not replace the complete table with prose or a partial bullet list.
    Never describe `runtime-guarded` as complete OS network isolation.
-7. Manual checks never pause the initial run. Report them together as pending.
+8. Manual checks never pause the initial run. Report them together as pending.
    When the user later responds, accept only an explicit `confirmed`, `failed`,
    `indeterminate`, or `excluded` response. Require an actor for every response,
    and require a reason for `excluded`; for that response, `--actor` identifies
    the approver. Do not infer confirmation.
-8. Record an explicit manual response with the same plugin-root runner using
+9. Record an explicit manual response with the same plugin-root runner using
    `--summary <summary_path> --manual-result <scenario-id> --response <response>
    --actor <actor>` and `--reason <reason>` when required. For `excluded`, pass
    the approver as `<actor>`. Parse only its stdout JSON. This updates the
    manual result; it does not authorize a verification rerun or a file read.
-9. Do not diagnose failures, rerun commands, edit tests, or edit production
+10. Do not diagnose failures, rerun commands, edit tests, or edit production
    code.
-10. If the user explicitly requests diagnosis, end this workflow and report
+11. If the user explicitly requests diagnosis, end this workflow and report
     that diagnosis is a separate task. Do not start it inside Assure.
 
 Read `references/result-policy.md` when explaining a status or verdict.

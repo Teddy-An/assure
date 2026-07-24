@@ -13,6 +13,10 @@
   step.
 - Never weaken temporary-copy execution, credential stripping, outbound
   fail-closed behavior, or probe-policy validation to improve pass rates.
+- Complete preparation and isolation preflight before scenario execution.
+  Require explicit user approval before dependency downloads or installs,
+  creation or modification of target-project `.assure/` files, or any new
+  permission. Never infer preparation approval from a general Assure request.
 - Keep generated project files under `.assure/`. Do not require Assure to add
   `AGENTS.md`, `CLAUDE.md`, or other workflow-control files to a target project.
 - Preserve the user's source and data. Tests for destructive behavior must use

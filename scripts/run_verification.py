@@ -19,7 +19,12 @@ if __package__:
     from .assure_output import detect_language, emit_json, localize
     from .assure_probe_policy import require_valid_probe_policy
     from .assure_runners import build_runner_command
-    from .assure_sandbox import Sandbox, SandboxUnavailable, prepare_sandbox
+    from .assure_sandbox import (
+        PreparationRequired,
+        Sandbox,
+        SandboxUnavailable,
+        prepare_sandbox,
+    )
     from .assure_state import classify_project
 else:
     from assure_common import AssureError, load_manifest, sha256_file, write_json
@@ -27,13 +32,28 @@ else:
     from assure_output import detect_language, emit_json, localize
     from assure_probe_policy import require_valid_probe_policy
     from assure_runners import build_runner_command
-    from assure_sandbox import Sandbox, SandboxUnavailable, prepare_sandbox
+    from assure_sandbox import (
+        PreparationRequired,
+        Sandbox,
+        SandboxUnavailable,
+        prepare_sandbox,
+    )
     from assure_state import classify_project
 
 
 RISKS = {"critical", "high", "normal"}
 MODES = {"automated", "manual", "uncovered", "excluded"}
 AUTOMATED_TIMEOUT_SECONDS = 15
+_RUNNER_INFRASTRUCTURE_MARKERS = (
+    "operation not permitted",
+    "permission denied",
+)
+_NO_TESTS_MARKERS = (
+    "(0 test)",
+    "tests  no tests",
+    "no tests ran",
+    "collected 0 items",
+)
 _WINDOWS_COMMAND_SUPERVISOR = (
     "import subprocess, sys\n"
     "if sys.stdin.buffer.read(1) != b'1':\n"
@@ -273,6 +293,19 @@ def safe_artifact_name(scenario_id: str) -> str:
     return f"{safe_prefix}-{digest}"
 
 
+def _runner_infrastructure_failure(log: str) -> str | None:
+    lowered = log.lower()
+    if (
+        any(marker in lowered for marker in _RUNNER_INFRASTRUCTURE_MARKERS)
+        and any(marker in lowered for marker in _NO_TESTS_MARKERS)
+    ):
+        return (
+            "verification runner could not start tests inside the isolated "
+            "environment; no product test executed"
+        )
+    return None
+
+
 def run_automated(
     project_root: Path,
     scenario: dict[str, Any],
@@ -312,16 +345,28 @@ def run_automated(
             if process.returncode != 0:
                 exit_code = process.returncode
     duration = round(time.monotonic() - started, 3)
+    infrastructure_reason = None
+    if exit_code != 0:
+        infrastructure_reason = _runner_infrastructure_failure(
+            scenario_artifact.read_text(encoding="utf-8", errors="replace")
+        )
     return {
         "id": scenario["id"],
         "name": scenario["name"],
         "section": scenario["section_name"],
         "risk": scenario["risk"],
         "mode": "automated",
-        "status": "O" if exit_code == 0 else "X",
+        "status": (
+            "O"
+            if exit_code == 0
+            else "?"
+            if infrastructure_reason
+            else "X"
+        ),
         "exit_code": exit_code,
         "duration_seconds": duration,
         "artifact": str(scenario_artifact),
+        "reason": infrastructure_reason,
     }
 
 
@@ -630,6 +675,8 @@ def record_manual_result(
 def execute_manifest(
     project_root: Path,
     manifest_path: Path,
+    approved_preparations: set[str] | None = None,
+    declined_preparations: set[str] | None = None,
 ) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
     require_valid_probe_policy(manifest, project_root)
@@ -662,24 +709,80 @@ def execute_manifest(
                 if item["verification"]["mode"] == "automated"
                 for test in item["verification"]["tests"]
             }
-            bootstrap_result = sandbox.bootstrap(runners)
-            bootstrap = {
-                "status": bootstrap_result.status,
-                "detail": bootstrap_result.detail,
-                "network": bootstrap_result.network,
-            }
-            if bootstrap_result.status != "ready":
-                raise SandboxUnavailable(bootstrap_result.detail)
-            for framework in sorted(runners):
-                injected = inject_mocks(sandbox.root, framework)
-                if mock_result is None:
-                    mock_result = injected
-                else:
-                    mock_result.injected.extend(injected.injected)
-                    mock_result.conflicts.extend(injected.conflicts)
-                    mock_result.unverifiable.extend(injected.unverifiable)
-            if mock_result and mock_result.unverifiable:
-                raise SandboxUnavailable("; ".join(mock_result.unverifiable))
+            if not sandbox.is_container:
+                sandbox.preflight(runners)
+            requirements = sandbox.required_preparations(
+                runners,
+                approved_preparations or set(),
+            )
+            if requirements:
+                requirement_ids = {item["id"] for item in requirements}
+                declined = requirement_ids & (declined_preparations or set())
+                if declined == requirement_ids:
+                    reason = (
+                        "user declined required dependency preparation; "
+                        "automated scenarios that need the test environment "
+                        "were not executed"
+                    )
+                    sandbox.cleanup()
+                    sandbox_cleanup = {
+                        "status": "removed",
+                        "detail": "Assure-owned sandbox removed",
+                    }
+                    sandbox = None
+                    bootstrap = {
+                        "status": "declined",
+                        "detail": reason,
+                        "network": "not-used",
+                    }
+                    for scenario in scenarios:
+                        if scenario["verification"]["mode"] == "automated":
+                            item = result_for_non_automated({
+                                **scenario,
+                                "verification": {"mode": "uncovered"},
+                            })
+                            item["reason"] = reason
+                            item["status"] = "?"
+                            results.append(item)
+                        else:
+                            results.append(result_for_non_automated(scenario))
+                    requirements = []
+                elif declined:
+                    raise AssureError(
+                        "preparation requirements must be approved or declined "
+                        "as a complete set"
+                    )
+            if requirements:
+                sandbox.cleanup()
+                sandbox_cleanup = {
+                    "status": "removed",
+                    "detail": "Assure-owned sandbox removed",
+                }
+                sandbox = None
+                raise PreparationRequired(requirements)
+            if sandbox is not None:
+                bootstrap_result = sandbox.bootstrap(runners)
+                bootstrap = {
+                    "status": bootstrap_result.status,
+                    "detail": bootstrap_result.detail,
+                    "network": bootstrap_result.network,
+                }
+                if bootstrap_result.status != "ready":
+                    raise SandboxUnavailable(bootstrap_result.detail)
+                if sandbox.is_container:
+                    sandbox.preflight(runners)
+                for framework in sorted(runners):
+                    injected = inject_mocks(sandbox.root, framework)
+                    if mock_result is None:
+                        mock_result = injected
+                    else:
+                        mock_result.injected.extend(injected.injected)
+                        mock_result.conflicts.extend(injected.conflicts)
+                        mock_result.unverifiable.extend(injected.unverifiable)
+                if mock_result and mock_result.unverifiable:
+                    raise SandboxUnavailable("; ".join(mock_result.unverifiable))
+        except PreparationRequired:
+            raise
         except SandboxUnavailable as exc:
             if bootstrap["status"] == "not-required":
                 bootstrap = {
@@ -783,6 +886,18 @@ def main() -> int:
     )
     parser.add_argument("--actor")
     parser.add_argument("--reason")
+    parser.add_argument(
+        "--approve-preparation",
+        action="append",
+        default=[],
+        choices=["dependency-download"],
+    )
+    parser.add_argument(
+        "--decline-preparation",
+        action="append",
+        default=[],
+        choices=["dependency-download"],
+    )
     args = parser.parse_args()
     if args.manual_result:
         if not args.summary or not args.response or not args.actor:
@@ -790,6 +905,12 @@ def main() -> int:
                 "--manual-result requires --summary, --response, and --actor"
             )
     project = args.project.resolve()
+    overlap = set(args.approve_preparation) & set(args.decline_preparation)
+    if overlap:
+        parser.error(
+            "the same preparation cannot be both approved and declined: "
+            + ", ".join(sorted(overlap))
+        )
     state = classify_project(project)
     if state.kind != "approved-current":
         emit_json({
@@ -820,7 +941,19 @@ def main() -> int:
         return exit_code_for_verdict(summary["verdict"])
 
     try:
-        summary = execute_manifest(project, Path(state.manifest_path))
+        summary = execute_manifest(
+            project,
+            Path(state.manifest_path),
+            set(args.approve_preparation),
+            set(args.decline_preparation),
+        )
+    except PreparationRequired as exc:
+        emit_json({
+            "state": "preparation-required",
+            "verdict": "not-run",
+            "requirements": exc.requirements,
+        })
+        return 3
     except AssureError as exc:
         emit_json({
             "state": "damaged",

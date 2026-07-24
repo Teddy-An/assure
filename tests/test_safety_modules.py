@@ -16,6 +16,72 @@ from scripts.run_verification import execute_manifest
 
 
 class SafetyModuleTests(unittest.TestCase):
+    def test_local_execution_temp_directories_stay_inside_sandbox(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sandbox = Sandbox(
+                Path(folder),
+                "local-isolated",
+                local_guard="/usr/bin/sandbox-exec",
+            )
+
+            env = sandbox.execution_env()
+
+            expected = str(Path(folder) / ".assure-tmp")
+            self.assertEqual(env["TMPDIR"], expected)
+            self.assertEqual(env["TMP"], expected)
+            self.assertEqual(env["TEMP"], expected)
+            self.assertTrue(Path(expected).is_dir())
+
+    def test_node_dependency_preparation_requires_explicit_approval(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "package.json").write_text(
+                json.dumps({
+                    "dependencies": {"react": "19.0.0"},
+                    "devDependencies": {"vitest": "4.0.0"},
+                }),
+                encoding="utf-8",
+            )
+            sandbox = Sandbox(
+                Path(folder),
+                "local-isolated",
+                local_guard="/usr/bin/sandbox-exec",
+            )
+            requirements = sandbox.required_preparations({"vitest"}, set())
+            self.assertEqual(
+                [item["id"] for item in requirements],
+                ["dependency-download"],
+            )
+            self.assertEqual(requirements[0]["stack"], ["Node.js", "React"])
+            self.assertEqual(requirements[0]["runners"], ["vitest"])
+            self.assertEqual(requirements[0]["evidence"], "package-lock.json")
+            self.assertIn("npm ci", requirements[0]["command"])
+            self.assertEqual(
+                sandbox.required_preparations(
+                    {"vitest"},
+                    {"dependency-download"},
+                ),
+                [],
+            )
+
+    def test_macos_local_preflight_checks_permissions_before_scenarios(self):
+        guard = shutil.which("sandbox-exec")
+        if sys.platform != "darwin" or not guard:
+            self.skipTest("macOS sandbox-exec is unavailable")
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with patch(
+                "scripts.assure_sandbox.shutil.which",
+                side_effect=lambda name: (
+                    guard if name == "sandbox-exec" else None
+                ),
+            ):
+                sandbox = prepare_sandbox(root)
+            try:
+                sandbox.preflight()
+                self.assertTrue((sandbox.root / ".assure-tmp").is_dir())
+            finally:
+                sandbox.cleanup()
+
     def test_shell_runner_is_rejected(self):
         with self.assertRaisesRegex(AssureError, "unsupported"):
             build_runner_command({"runner": "shell", "command": "echo bad"}, Path.cwd())

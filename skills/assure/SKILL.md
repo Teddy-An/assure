@@ -5,7 +5,7 @@ description: Use when the user wants Assure to prepare, update, and run trustwor
 
 # Assure
 
-Run Assure end to end without conversational gates.
+Run Assure end to end, pausing only for required preparation approval.
 
 ## Workflow isolation
 
@@ -79,9 +79,11 @@ discovery; continue only after `<python-command>` is selected.
    - `absent`, `incomplete`, `draft`, `review`, `damaged`, or
      `approved-stale`: use `$assure:assure-map`.
 
-3. After mapping, automatically approve the generated source snapshot and
-   continue to `$assure:assure-verify` in the same turn. Do not ask the user
-   to select tests, approve a baseline, or create a Git commit.
+3. Before mapping creates or changes `.assure/` files, present the exact files,
+   purpose, and project impact and obtain explicit user approval. After that
+   approval, automatically approve the generated source snapshot and continue
+   to `$assure:assure-verify`; do not ask the user to select tests, approve a
+   baseline, or create a Git commit.
 4. Treat Docker, Podman, and other external helpers as optional providers.
    Assure must use its supported OS isolation when no helper is available.
    Never run tests from the original project tree. If neither container nor
@@ -93,5 +95,12 @@ discovery; continue only after `<python-command>` is selected.
 6. Never accept `functional-probes-v1` from manifest metadata alone. Require
    the deterministic policy validator to confirm every probe or recorded
    unavailable attempt before verification.
-7. Treat environment, sandbox, mock, manual, and coverage gaps as final result
-   states. Always return the best available verdict instead of pausing.
+7. Verification preparation must finish before any scenario runs. When the
+   verifier returns `preparation-required`, present every requested download,
+   installation, creation, or permission with the detected stack, runner,
+   evidence file, command, reason, scope, and impact. Prefer a native choice UI
+   when available; otherwise offer `1. Approve` and `2. Decline`. Empty input
+   is never approval. On decline, mark affected scenarios Unverified, explain
+   the lost coverage, and continue without the declined preparation.
+8. Treat environment, sandbox, mock, manual, and coverage gaps discovered
+   after approved preparation as final result states.

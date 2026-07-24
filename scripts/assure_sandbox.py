@@ -33,6 +33,12 @@ class SandboxUnavailable(AssureError):
     pass
 
 
+class PreparationRequired(AssureError):
+    def __init__(self, requirements: list[dict[str, object]]):
+        super().__init__("user approval is required before preparation")
+        self.requirements = requirements
+
+
 @dataclass(frozen=True)
 class BootstrapResult:
     status: str
@@ -65,7 +71,9 @@ class Sandbox:
         if self.is_container:
             return None
         safe_home = self.root / ".assure-home"
+        safe_temp = self.root / ".assure-tmp"
         safe_home.mkdir(exist_ok=True)
+        safe_temp.mkdir(exist_ok=True)
         blocked = (
             "AWS_", "AZURE_", "GOOGLE_", "GCLOUD_", "FIREBASE_",
             "GITHUB_TOKEN", "GH_TOKEN", "NPM_TOKEN", "NODE_AUTH_TOKEN",
@@ -79,6 +87,9 @@ class Sandbox:
             "CI": "1",
             "HOME": str(safe_home),
             "USERPROFILE": str(safe_home),
+            "TMPDIR": str(safe_temp),
+            "TMP": str(safe_temp),
+            "TEMP": str(safe_temp),
         })
         if block_network:
             env.update({
@@ -94,6 +105,215 @@ class Sandbox:
 
     def execution_env(self) -> dict[str, str] | None:
         return self._local_env(block_network=True)
+
+    def preflight(self, runners: set[str] | None = None) -> None:
+        if self.is_container:
+            if not runners:
+                return
+            if runners == {"pytest"}:
+                image = "python:3.13"
+                probe = [
+                    "python",
+                    "-c",
+                    (
+                        "from pathlib import Path; "
+                        "p=Path('/workspace/.assure-preflight'); "
+                        "p.write_text('ok'); p.unlink()"
+                    ),
+                ]
+            else:
+                image = "node:22"
+                probe = [
+                    "node",
+                    "-e",
+                    (
+                        "const fs=require('fs');"
+                        "const p='/workspace/.assure-preflight';"
+                        "fs.writeFileSync(p,'ok');fs.unlinkSync(p)"
+                    ),
+                ]
+            try:
+                completed = subprocess.run(
+                    [
+                        self.provider,
+                        "run",
+                        "--rm",
+                        "--network",
+                        "none",
+                        "--volume",
+                        f"{self.root}:/workspace",
+                        "--workdir",
+                        "/workspace",
+                        image,
+                        *probe,
+                    ],
+                    cwd=self.root,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=30,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise SandboxUnavailable(
+                    f"container isolation preflight failed: {exc}"
+                ) from exc
+            if completed.returncode != 0:
+                detail = (completed.stderr or completed.stdout).strip()
+                raise SandboxUnavailable(
+                    "container isolation preflight failed before scenario "
+                    f"execution: {detail[-1000:] or completed.returncode}"
+                )
+            return
+        if not self.local_guard:
+            raise SandboxUnavailable(
+                "local OS filesystem and network isolation is unavailable"
+            )
+        outside = self.root.parent / f"{self.root.name}-preflight-outside"
+        source = (
+            "import os, socket, sys, tempfile\n"
+            "root = os.path.realpath(sys.argv[1])\n"
+            "outside = sys.argv[2]\n"
+            "handle, temporary = tempfile.mkstemp(prefix='assure-preflight-')\n"
+            "os.write(handle, b'ok')\n"
+            "os.close(handle)\n"
+            "if os.path.commonpath([root, os.path.realpath(temporary)]) != root:\n"
+            "    raise SystemExit('temporary path escaped sandbox')\n"
+            "os.unlink(temporary)\n"
+            "try:\n"
+            "    open(outside, 'w', encoding='utf-8').write('unsafe')\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    os.unlink(outside)\n"
+            "    raise SystemExit('outside write was not blocked')\n"
+            "network = socket.socket()\n"
+            "try:\n"
+            "    network.bind(('127.0.0.1', 0))\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    network.close()\n"
+            "    raise SystemExit('network bind was not blocked')\n"
+            "network.close()\n"
+        )
+        try:
+            completed = subprocess.run(
+                [
+                    self.local_guard,
+                    "-f",
+                    str(self.root / ".assure-sandbox.sb"),
+                    sys.executable,
+                    "-c",
+                    source,
+                    str(self.root),
+                    str(outside),
+                ],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+                env=self.execution_env(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise SandboxUnavailable(f"isolation preflight failed: {exc}") from exc
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()
+            raise SandboxUnavailable(
+                "isolation preflight failed before scenario execution: "
+                f"{detail[-1000:] or f'exit code {completed.returncode}'}"
+            )
+
+    def required_preparations(
+        self,
+        runners: set[str],
+        approved: set[str],
+    ) -> list[dict[str, object]]:
+        if "dependency-download" in approved:
+            return []
+        if self.is_container or runners & {"vitest", "jest"}:
+            node_runners = sorted(runners & {"vitest", "jest"})
+            if node_runners:
+                stack = ["Node.js"]
+                package_json = self.root / "package.json"
+                if package_json.exists():
+                    try:
+                        package = json.loads(
+                            package_json.read_text(encoding="utf-8")
+                        )
+                    except (OSError, json.JSONDecodeError):
+                        package = {}
+                    runtime_dependencies = package.get("dependencies", {})
+                    development_dependencies = package.get(
+                        "devDependencies",
+                        {},
+                    )
+                    dependencies = {
+                        **(
+                            runtime_dependencies
+                            if isinstance(runtime_dependencies, dict)
+                            else {}
+                        ),
+                        **(
+                            development_dependencies
+                            if isinstance(development_dependencies, dict)
+                            else {}
+                        ),
+                    }
+                    frameworks = (
+                        ("react", "React"),
+                        ("vue", "Vue"),
+                        ("@angular/core", "Angular"),
+                        ("svelte", "Svelte"),
+                    )
+                    stack.extend(
+                        label
+                        for package_name, label in frameworks
+                        if package_name in dependencies
+                    )
+                command = (
+                    "npm ci --ignore-scripts --no-bin-links "
+                    "--no-audit --no-fund"
+                )
+                evidence = "package-lock.json"
+                reason = (
+                    f"{', '.join(node_runners)} executes the project's "
+                    "JavaScript/TypeScript tests and its locked packages are "
+                    "not copied from the original node_modules directory"
+                )
+                affected_runners = node_runners
+            else:
+                stack = ["Python"]
+                command = (
+                    "python -m pip install --only-binary=:all: "
+                    "--require-hashes -r requirements.txt"
+                )
+                evidence = "requirements.txt"
+                reason = (
+                    "pytest executes the project's Python tests inside the "
+                    "isolated container"
+                )
+                affected_runners = sorted(runners)
+            return [{
+                "id": "dependency-download",
+                "stack": stack,
+                "runners": affected_runners,
+                "provider": self.provider,
+                "evidence": evidence,
+                "command": command,
+                "reason": reason,
+                "action": (
+                    "download and install locked test dependencies in an "
+                    "Assure-owned temporary copy"
+                ),
+                "impact": (
+                    "network is enabled only during dependency preparation; "
+                    "the original project and production services are not modified"
+                ),
+            }]
+        return []
 
     def bootstrap(self, runners: set[str]) -> BootstrapResult:
         if not self.is_container:

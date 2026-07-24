@@ -105,6 +105,17 @@ class SkillIsolationTests(unittest.TestCase):
         self.assertIn("functional-probes-v1", mapping)
         self.assertIn("assure_probe_policy.py", mapping)
 
+    def test_skills_require_preparation_approval_before_execution_or_creation(self):
+        assure = SKILL_PATHS[0].read_text(encoding="utf-8")
+        mapping = SKILL_PATHS[1].read_text(encoding="utf-8")
+        verification = SKILL_PATHS[2].read_text(encoding="utf-8")
+        self.assertIn("preparation-required", assure)
+        self.assertIn("explicit user approval", assure)
+        self.assertIn("Before creating or changing", mapping)
+        self.assertIn("explicit user approval", mapping)
+        self.assertIn("--approve-preparation", verification)
+        self.assertIn("Never execute a scenario before the gate passes", verification)
+
     def test_main_workflow_declares_core_safety_and_mapping_invariants(self):
         assure = (
             PLUGIN_ROOT / "skills" / "assure" / "SKILL.md"

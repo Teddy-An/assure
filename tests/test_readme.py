@@ -59,6 +59,14 @@ class ReadmeTests(unittest.TestCase):
         self.assertIn("Assure-owned functional probe", english)
         self.assertIn("valid, invalid, and boundary inputs", english)
 
+    def test_readmes_require_preparation_before_scenario_execution(self):
+        korean = README.read_text(encoding="utf-8")
+        english = README_EN.read_text(encoding="utf-8")
+        self.assertIn("준비 우선·명시적 승인", korean)
+        self.assertIn("승인 전에는 시나리오를 실행하지", korean)
+        self.assertIn("Prepare first, require explicit approval", english)
+        self.assertIn("Run no scenario before that choice", english)
+
     def test_readme_uses_human_result_labels_without_internal_symbols(self):
         korean = README.read_text(encoding="utf-8")
         english = README_EN.read_text(encoding="utf-8")
