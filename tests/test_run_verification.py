@@ -30,12 +30,12 @@ class LocalTestSandbox:
     def preflight(self, runners=None) -> None:
         pass
 
-    def required_preparations(
+    def validate_test_environment(
         self,
-        runners: set[str],
-        approved: set[str],
-    ) -> list[dict[str, str]]:
-        return []
+        runners,
+        require_stateful_firestore=False,
+    ) -> None:
+        pass
 
     def wrap(self, argv: list[str], runner: str) -> list[str]:
         if runner == "pytest":
@@ -237,7 +237,7 @@ class VerificationRunnerTests(unittest.TestCase):
         report = Path(result["report"]).read_text(encoding="utf-8")
         saved_summary = Path(result["summary_path"]).read_text(encoding="utf-8")
         self.assertIn("| No. | Risk | Section | ID |", report)
-        self.assertIn("| Automated | Passed | exit code: `0`<br>", report)
+        self.assertIn("| Project test | Passed | exit code: `0`<br>", report)
         self.assertNotIn("secret-success-log", report)
         self.assertNotIn("secret-success-log", saved_summary)
 
@@ -284,7 +284,7 @@ class VerificationRunnerTests(unittest.TestCase):
         self.assertEqual(verification["status"], "?")
         self.assertIn("no product test executed", verification["reason"])
 
-    def test_declined_preparation_skips_execution_and_reports_unverified(self):
+    def test_verification_never_pauses_for_dependency_preparation(self):
         root, commit = self.make_repo()
         marker = root / ".assure" / "must-not-run"
         manifest = self.make_manifest(
@@ -310,16 +310,11 @@ class VerificationRunnerTests(unittest.TestCase):
             "scripts.run_verification.prepare_sandbox",
             side_effect=lambda project: RequiredPreparationSandbox(project),
         ):
-            result = execute_manifest(
-                root,
-                manifest,
-                declined_preparations={"dependency-download"},
-            )
+            result = execute_manifest(root, manifest)
 
-        self.assertFalse(marker.exists())
-        self.assertEqual(result["results"][0]["status"], "?")
-        self.assertEqual(result["bootstrap"]["status"], "declined")
-        self.assertIn("user declined", result["results"][0]["reason"])
+        self.assertTrue(marker.exists())
+        self.assertEqual(result["results"][0]["status"], "O")
+        self.assertEqual(result["bootstrap"]["status"], "ready")
 
     def test_timeout_terminates_child_process_before_it_can_write_a_marker(self):
         root = Path(tempfile.mkdtemp())
@@ -432,7 +427,7 @@ class VerificationRunnerTests(unittest.TestCase):
                 None,
             )
 
-    def test_all_registered_checks_run_after_an_earlier_failure(self):
+    def test_item_stops_after_first_failed_case(self):
         root, commit = self.make_repo()
         marker = root / ".assure" / "second-check-ran"
         manifest_path = self.write_manifest(
@@ -470,7 +465,7 @@ class VerificationRunnerTests(unittest.TestCase):
 
         self.assertEqual(result["results"][0]["status"], "X")
         self.assertEqual(result["results"][0]["exit_code"], 7)
-        self.assertEqual(marker.read_text(encoding="utf-8"), "ran")
+        self.assertFalse(marker.exists())
 
     def test_summary_identity_binds_manifest_bytes_loaded_before_commands(self):
         root, commit = self.make_repo()
@@ -565,7 +560,7 @@ class VerificationRunnerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             AssureError,
-            "verification_policy must be functional-probes-v1",
+            "verification_policy must be assure-generated-probes-v2",
         ):
             execute_manifest(root, manifest_path)
 

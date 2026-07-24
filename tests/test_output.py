@@ -68,6 +68,14 @@ class OutputTests(unittest.TestCase):
                 "exit_code": 1,
                 "duration_seconds": 0.5,
                 "artifact": "/tmp/result.log",
+                "failure": {
+                    "kind": "assertion-failure",
+                    "id": "abc123def456",
+                    "test": "refund is idempotent",
+                    "message": "AssertionError: expected 2 to equal 1",
+                    "location": "refund.test.ts:42:7",
+                    "counts": "Tests 1 failed | 4 passed",
+                },
             }],
             "artifact_directory": "/tmp/artifacts",
         })
@@ -92,6 +100,9 @@ class OutputTests(unittest.TestCase):
             report,
         )
         self.assertIn("환불 \\| 중복 방지", report)
+        self.assertIn("오류 ID: abc123def456", report)
+        self.assertIn("실패 테스트: refund is idempotent", report)
+        self.assertIn("발생 위치: refund.test.ts:42:7", report)
 
 
 if __name__ == "__main__":

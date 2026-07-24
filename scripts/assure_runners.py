@@ -29,13 +29,30 @@ def _validated_args(value: Any) -> list[str]:
     return list(value)
 
 
+def _validated_selector(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise AssureError("runner selector must be a non-empty string")
+    if "\0" in value:
+        raise AssureError("runner selector contains a NUL byte")
+    return value
+
+
 def build_runner_command(entry: dict[str, Any], project_root: Path) -> RunnerCommand:
     del project_root
     runner = entry.get("runner")
     args = _validated_args(entry.get("args", []))
+    selector = _validated_selector(entry.get("selector"))
     if runner == "pytest":
-        return RunnerCommand(sys.executable, ["-m", "pytest", *args])
+        selected = ["-k", selector] if selector else []
+        return RunnerCommand(sys.executable, ["-m", "pytest", *args, *selected])
     if runner in {"vitest", "jest"}:
         executable = "npx.cmd" if os.name == "nt" else "npx"
-        return RunnerCommand(executable, ["--no-install", runner, *args])
+        selected = ["-t", selector] if selector else []
+        package = runner
+        return RunnerCommand(
+            executable,
+            ["--no-install", package, *args, *selected],
+        )
     raise AssureError(f"unsupported automated test runner: {runner}")

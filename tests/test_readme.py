@@ -62,10 +62,32 @@ class ReadmeTests(unittest.TestCase):
     def test_readmes_require_preparation_before_scenario_execution(self):
         korean = README.read_text(encoding="utf-8")
         english = README_EN.read_text(encoding="utf-8")
-        self.assertIn("준비 우선·명시적 승인", korean)
+        self.assertIn("준비 우선·일괄 승인", korean)
         self.assertIn("승인 전에는 시나리오를 실행하지", korean)
-        self.assertIn("Prepare first, require explicit approval", english)
-        self.assertIn("Run no scenario before that choice", english)
+        self.assertIn("Prepare once, approve once", english)
+        self.assertIn("never prompt or pause", english)
+
+    def test_readmes_document_selector_isolation_and_failure_details(self):
+        korean = README.read_text(encoding="utf-8")
+        english = README_EN.read_text(encoding="utf-8")
+        for value in ("`selector`", "오류 ID", "실패 테스트 이름", "`미검증`"):
+            self.assertIn(value, korean)
+        for value in (
+            "Every test `selector`",
+            "stable failure ID",
+            "failed test",
+            "Unverified",
+        ):
+            self.assertIn(value, english)
+
+    def test_readmes_define_one_project_sandbox_and_health_gate(self):
+        korean = README.read_text(encoding="utf-8")
+        english = README_EN.read_text(encoding="utf-8")
+        self.assertIn("sandbox-profile.json", korean)
+        self.assertIn("공통 Sandbox 프로필", korean)
+        self.assertIn("건강검사", korean)
+        self.assertIn("project-level Sandbox profile", english)
+        self.assertIn("Sandbox health check", english)
 
     def test_readme_uses_human_result_labels_without_internal_symbols(self):
         korean = README.read_text(encoding="utf-8")

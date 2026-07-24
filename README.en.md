@@ -27,8 +27,9 @@ Assure turns those questions into a repeatable, full-project verification
 baseline.
 
 ```text
-Discover features → Derive inputs, outputs, and effects → Map existing tests
-                  → Create Assure probes → Isolate and run → Judge release
+Inspect environment → Build common Sandbox → Derive feature behavior
+                    → Create Assure probes for every scenario
+                    → Isolate and run → Judge release
 ```
 
 ## What makes it different?
@@ -44,9 +45,10 @@ Discover features → Derive inputs, outputs, and effects → Map existing tests
 | External systems | Real connection or separate environment | Depends on the approach | Replace supported boundaries and reject the rest |
 | Final output | Pass/fail | Explanation or code changes | Risk-based release verdict |
 
-Assure uses Vitest, Jest, pytest, and other existing runners, but it does not
-send a scenario directly to manual confirmation just because no existing test
-covers it. It creates an Assure-owned functional probe that calls real product
+Assure uses existing runners such as Vitest, Jest, and pytest, but it never
+executes project-owned tests directly as release evidence. Existing tests are
+supporting context for expected behavior only. For every automated scenario,
+it creates an Assure-owned functional probe that calls real product
 code, replaces only unsafe database, identity, payment, messaging, or API
 boundaries when supported, and verifies results and effects. It does not
 execute a boundary that cannot be replaced safely.
@@ -82,13 +84,11 @@ execute a boundary that cannot be replaced safely.
    consent-dependent outcomes.
 10. **Regress the complete baseline**: Run every approved feature scenario, not
    only changed files, to detect effects on other functionality.
-11. **Prepare first, require explicit approval**: Before any scenario runs,
-   check isolation permissions and runner readiness. If verification needs a
-   dependency download or install, a functional probe, another new file, or
-   additional permission, show the target, reason, and impact and wait for
-   an explicit choice. Run no scenario before that choice. On decline, record
-   affected scenarios and the lost coverage as Unverified and continue with
-   the remaining workflow.
+11. **Prepare once, approve once**: Before any scenario runs, inventory every
+   dependency, generated file, permission, command, cleanup, and regeneration
+   operation in one complete Sandbox plan. Obtain exactly one approval. After
+   approval, perform the entire plan automatically and never prompt or pause
+   while tests are running. If declined, do not start tests.
 
 ### Isolation from other workflows
 
@@ -138,12 +138,8 @@ User request
                         ├─ Authorization boundaries       │
                         └─ Outbound effects               │
                            │                              │
-                           ├─ Existing test proves it     │
-                           │  └─ Map existing test        │
-                           │                              │
-                           └─ Existing test is insufficient
-                              └─ Explain files and impact
-                                 └─ Obtain user approval
+                           └─ Existing tests are context only
+                              └─ Use the one approved Sandbox plan
                                     └─ Create Assure probe
                                  ├─ Success input
                                  ├─ Failure input
@@ -161,7 +157,7 @@ User request
                                  ├─ Success/failure/boundary cases
                                  ├─ Result/effect assertions
                                  └─ Record attempts for unverified items
-                                    └─ Approve baseline and snapshot
+                                    └─ Record baseline and snapshot
                                                         │
    ┌────────────────────────────────────────────────────┘
    └─ Preflight verification preparation
@@ -170,9 +166,8 @@ User request
       ├─ Check runner, dependencies, and permissions
       └─ Download, install, or creation required
          ├─ No → continue
-         └─ Yes → explain target, reason, and impact
-                   ├─ Approve → perform approved preparation
-                   └─ Decline → mark affected checks Unverified
+         └─ Yes → already covered by Sandbox approval
+                   └─ perform preparation automatically
    └─ Execute every approved scenario
       └─ Select execution provider
          ├─ Docker or Podman available → stronger isolation
@@ -190,7 +185,6 @@ User request
                         └─ Release verdict
                            ├─ releasable
                            ├─ blocked
-                           ├─ approval-required
                            └─ warning
 ```
 
@@ -202,33 +196,81 @@ Open a project in Codex and ask:
 Run Assure for this project.
 ```
 
-Assure follows the workflow required by the project state, but pauses before
-preparation that needs new files, dependencies, or permissions:
-
-The prompt shows the detected stack, test runner, lockfile evidence, exact
-command, reason, and impact. Use a native Approve/Decline picker when the host
-provides one; otherwise the user can enter `1` or `2`. Empty input is never
-approval. Declining skips the affected automatic checks, records them as
-Unverified, and continues the report.
+Assure presents one Sandbox approval before testing. It shows the detected
+stack, runner, lockfiles, every dependency and `.assure/` write, permissions,
+commands, cleanup, reason, and impact. That approval authorizes the complete
+preparation plan. There are no later approval prompts.
 
 1. Inspect the project structure and test environment.
-2. Organize user scenarios by product feature.
-3. Map existing tests before generating anything.
-4. Derive valid, invalid, and boundary inputs and expected outcomes.
-5. Explain planned `.assure/` files and probes, obtain approval, then create
-   them.
-6. Block unsafe external connections and record attempted effects.
-7. Record the current source snapshot as the verification baseline.
-8. Preflight isolation permissions, temporary paths, and runners; obtain any
-   required download or install approval; then run the complete population.
-9. Report only irreducibly human and uncovered items.
-10. Return a release verdict.
+2. Define the project-wide Sandbox profile and required preparations.
+3. Prepare the approved Sandbox and pass its health checks.
+4. Organize scenarios by feature and read existing tests only as context.
+5. Derive valid, invalid, and boundary inputs and expected outcomes.
+6. Create every approved `.assure/` file and probe automatically.
+7. Block unsafe external connections and record attempted effects.
+8. Record the current source snapshot as the verification baseline.
+9. Preflight isolation permissions, temporary paths, and runners; complete all
+   approved preparation; then run the complete population without pausing.
+10. Report only irreducibly human and uncovered items.
 
-The functional-probe policy cannot pass by name alone. Before approval or
+Before execution, Assure inventories the detected stack, test runners,
+isolation providers, `.assure` write access, and scenario capabilities. It
+does not request administrator privileges globally. Elevation is requested
+only for a proven required operation, with its exact target and reason.
+
+For capabilities that require preparation, including React DOM, the one
+Sandbox approval creates a locked overlay under `.assure/capabilities`
+and applies it only to the temporary project copy. Original package files are
+not changed. When no fixed recipe exists, the user's LLM
+creates a bounded project-specific preparation plan and adapter, then Assure
+requires a health check. Missing built-in installation logic alone is never an
+Unverified result.
+External stores and identity providers are not baseline verification targets.
+Assure uses mocks and an effect ledger to prove that real product logic reaches
+the pre-write or pre-send boundary with the exact request, while rejected input
+produces no outbound effect.
+When a boundary has no built-in adapter, the user's LLM creates a
+project-specific adapter under `.assure/adapters/`. Its registry records the
+runner, covered boundaries, file SHA-256, and current Assure generation
+identity. Only adapters that pass static validation and a Sandbox health check
+are injected into the runner.
+
+Test-environment, adapter, mock, and runner failures are not product failures.
+They are separated as Unverified preparation failures, while product assertion
+failures remain release evidence. Assure-generated Firestore fakes must satisfy
+the validated stateful read-after-write contract; obsolete stateless fakes are
+rejected during baseline validation.
+
+Assure does not design a separate Sandbox for every feature. It creates one
+project-level Sandbox profile, and every functional probe uses the same
+isolation, mock, and temporary-data contract. Before product scenarios start,
+Assure validates the environment fingerprint, runner startup, network denial,
+mock injection, and stateful storage contract. A failed Sandbox health check
+produces Unverified infrastructure results, never product failures. No
+preparation choice exists after testing begins.
+
+Every Assure-generated test records the creating Assure version, distribution
+source SHA-256, probe schema, and generator contract near the start of the
+file. Before execution, all four values must match the current installation.
+A missing or mismatched marker forces remapping without another prompt.
+Stale files under `.assure/probes/` are automatically deleted and regenerated from the
+current plugin guide. Project-owned tests remain read-only context and are
+never stamped or deleted.
+
+```text
+// ASSURE_GENERATED: version=0.2.0-dev distribution_sha256=<sha256> probe_schema=2 generator_contract=assure-llm-probe-v2
+```
+11. Return a release verdict.
+
+The functional-probe policy cannot pass by name alone. Before baseline recording or
 execution, Assure validates the probe file, product-code entry point,
 success/failure/boundary cases, and result/side-effect assertions. A scenario
 that cannot support a probe must record the strategies attempted and a
 technical blocker; otherwise Assure marks the baseline stale and remaps it.
+
+Every test `selector` is passed to the real command as Vitest/Jest `-t` or
+pytest `-k`. A failure in another test from a shared probe file is not recorded
+as a failure of the selected scenario.
 
 Assure does not automatically edit production code. When a test exposes an
 existing defect, Assure reports it as verification evidence.
@@ -261,7 +303,13 @@ Each scenario has one of these results:
 | Unverified | Environment, permission, data, or missing coverage prevented a conclusion |
 | Excluded | Removed from verification with a recorded reason and approver |
 
-The final verdict is `releasable`, `blocked`, `approval-required`, or `warning`
+Automatic failures include more than an exit code when the runner exposes the
+evidence: failure type, stable failure ID, failed test, assertion message,
+source location, and passed/failed counts. Repeated failure IDs identify a
+common cause across scenarios. Environment failures before test collection are
+reported as Unverified rather than product failures.
+
+The final verdict is `releasable`, `blocked`, or `warning`
 according to scenario risk and unresolved evidence.
 
 ## Safe execution
@@ -273,8 +321,8 @@ Assure's safety principles apply to every execution provider.
 - Do not copy or inherit `.env` files, cloud credentials, or private keys.
 - Preflight internal temporary writes and cleanup plus outside-write and
   network denial before scenario execution.
-- Prepare lockfile-pinned dependencies only inside the temporary copy and only
-  after explaining the action and receiving explicit user approval.
+- Prepare lockfile-pinned dependencies only inside the temporary copy and
+  include all of them in the one pre-test Sandbox approval.
 - Disable package lifecycle scripts and binary links.
 - Execute only supported test runners with validated argument arrays.
 - Block ordinary network access during test execution.
@@ -440,8 +488,10 @@ Start a new Codex thread after installation so the Assure skills are loaded.
 
 ```text
 .assure/
+├── sandbox-profile.json         # Project-wide Sandbox contract and environment fingerprint
 ├── verification-manifest.yaml  # Features, scenarios, risks, baseline
 ├── discovery-index.json        # Full and incremental inventory
+├── adapters/                   # LLM-generated Sandbox adapters and registry
 ├── probes/                     # Assure-owned project-specific functional checks
 ├── artifacts/                  # Automated verification evidence
 └── reports/                    # JSON and Markdown results

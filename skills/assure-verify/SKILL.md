@@ -39,47 +39,56 @@ Select the first command that reports Python 3.9 or newer and retain it as
 `<python-command>` for the entire workflow. Python 2 and Python 3.8 or older
 are unsupported.
 
-If none is available, tell the user that Python 3.9 or newer is required and
-ask whether to install it. Do not install Python or change the environment
-without explicit user approval. After an approved installation, rerun runtime
-discovery; continue only after `<python-command>` is selected.
+If none is available, include Python 3.9 or newer and its exact installation
+impact in the one complete Sandbox plan. Do not ask separately. If the plan is
+approved, install it with the rest of preparation; if declined, do not begin
+testing.
 
 1. Run
+   `<python-command> <assure-root>/scripts/assure_capabilities.py --project
+   <root>` before state inspection or scenario execution. Show the detected
+   stack, runner, isolation provider, `.assure` write access, and capability
+   statuses. Never require administrator privileges by default. Request
+   elevation only when the complete pre-test Sandbox plan proves a concrete
+   required operation has a permission gap. Include it in the same approval.
+2. Resolve every `preparation-required` capability before verification. Present
+   one complete minimal Sandbox plan with all packages, files, reasons, impact,
+   and lost coverage. Obtain one batch approval, then run
+   `prepare_capability.py --project <root> --capability <id> --approved` only
+   after explicit approval without additional prompts. Do not install or run
+   external providers for baseline evidence; replace their request/write
+   boundary with mocks and an effect ledger.
+3. Run `assure_sandbox_profile.py --project <root>` and require a current
+   project-level common Sandbox profile before state inspection. If it is
+   missing or stale, route to mapping and rebuild it under the existing
+   complete Sandbox approval. The verifier must validate the
+   Sandbox contract and its adapters before any product scenario runs.
+   Before state inspection, also run
+   `assure_probe_compatibility.py --project <root>`. If any generated probe is
+   missing the current Assure version, distribution hash, probe schema, or
+   generator contract, do not execute it. Route to mapping, delete stale files
+   only under `.assure/probes/` automatically using `--delete-stale`, and
+   regenerate every deleted scenario
+   from the current guide. Never modify or delete project-owned tests.
+4. Run
    `<python-command> <assure-root>/scripts/assure_state.py --project <root>`.
-2. Parse the state JSON. Continue for `approved-current`; otherwise route
+5. Parse the state JSON. Continue for `approved-current`; otherwise route
    automatically to `$assure:assure-map` and resume verification afterward.
-3. Run
+6. Run
    `<python-command> <assure-root>/scripts/run_verification.py --project <root>`
-   as a preparation gate. This performs isolation preflight before scenarios.
-   If stdout reports `preparation-required`, present each requested download,
-   installation, creation, or permission with the detected project stack,
-   runner, evidence file, exact command, reason, scope, and impact. Prefer a
-   native two-choice selection UI when the host provides one. Otherwise show:
-   `1. Approve — prepare and run` and
-   `2. Decline — mark affected scenarios Unverified and continue`.
-   Accept `1` or any unambiguous affirmative response as approval and `2` or
-   any unambiguous negative response as decline. Empty input is never approval.
-   Do not infer approval from the original Assure request.
-4. After approval, rerun once with
-   `--approve-preparation <requirement-id>` for every approved requirement.
-   After decline, rerun with
-   `--decline-preparation <requirement-id>` for every declined requirement;
-   explain which scenarios cannot run, mark them Unverified, and continue to
-   the complete report.
-   If no approval is required, the preparation-gate call continues directly
-   into verification. Never execute a scenario before the gate passes.
+   once. The approved common Sandbox profile already covers every locked
+   dependency download and install. Bootstrap automatically and continue to
+   the final report without a preparation prompt or a second verifier run.
+7. Never execute a scenario before Sandbox bootstrap and health checks pass.
    Do not execute scenario commands individually from the conversation.
    Never run from the original tree, inherit production credentials, or permit
    production data or service access.
-5. Parse only the command's stdout JSON summary. Exit code `3` with
-   `preparation-required` means no scenario ran and requires a user decision.
-   A nonzero exit for `blocked`
-   or `approval-required` is a verification result, not permission to inspect
-   other evidence.
-6. Never open files under `.assure/artifacts/` or any artifact, report, or
+8. Parse only the command's stdout JSON summary. A nonzero exit for `blocked`
+   is a verification result, not permission to inspect other evidence.
+9. Never open files under `.assure/artifacts/` or any artifact, report, or
    summary path returned by the JSON. Artifact paths are identifiers to report,
    not files to read.
-7. Present the verdict first. Then use Markdown tables for:
+10. Present the verdict first. Then use Markdown tables for:
    - baseline commit, project root, execution provider, and report path;
    - exact network assurance: `os-blocked`, `runtime-guarded`, or `not-run`;
    - result counts using localized labels, never raw status symbols;
@@ -94,19 +103,23 @@ discovery; continue only after `<python-command>` is selected.
    the user-facing result.
    Do not replace the complete table with prose or a partial bullet list.
    Never describe `runtime-guarded` as complete OS network isolation.
-8. Manual checks never pause the initial run. Report them together as pending.
+   For an automated failure, include every compact failure field returned by
+   the verifier: failure type, failure ID, failed test, assertion message,
+   source location, and test counts. Use repeated failure IDs to explain a
+   shared cause without claiming that each scenario failed independently.
+11. Manual checks never pause the initial run. Report them together as pending.
    When the user later responds, accept only an explicit `confirmed`, `failed`,
    `indeterminate`, or `excluded` response. Require an actor for every response,
    and require a reason for `excluded`; for that response, `--actor` identifies
    the approver. Do not infer confirmation.
-9. Record an explicit manual response with the same plugin-root runner using
+12. Record an explicit manual response with the same plugin-root runner using
    `--summary <summary_path> --manual-result <scenario-id> --response <response>
    --actor <actor>` and `--reason <reason>` when required. For `excluded`, pass
    the approver as `<actor>`. Parse only its stdout JSON. This updates the
    manual result; it does not authorize a verification rerun or a file read.
-10. Do not diagnose failures, rerun commands, edit tests, or edit production
+13. Do not diagnose failures, rerun commands, edit tests, or edit production
    code.
-11. If the user explicitly requests diagnosis, end this workflow and report
+14. If the user explicitly requests diagnosis, end this workflow and report
     that diagnosis is a separate task. Do not start it inside Assure.
 
 Read `references/result-policy.md` when explaining a status or verdict.
