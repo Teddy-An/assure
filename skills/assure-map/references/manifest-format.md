@@ -8,6 +8,7 @@ Required root fields:
 - `baseline.status`: `draft`, `review`, or `approved`
 - `baseline.commit`: full Git commit when approved
 - `baseline.approved_at`: ISO 8601 timestamp when approved
+- `baseline.verification_policy`: `functional-probes-v1` when approved
 - `sections`: ordered list
 
 Each section requires `id`, `name`, and `scenarios`.
@@ -71,6 +72,7 @@ baseline:
   status: approved
   commit: 0123456789abcdef0123456789abcdef01234567
   approved_at: 2026-07-23T12:00:00+09:00
+  verification_policy: functional-probes-v1
 sections:
   - id: auth
     name: 인증

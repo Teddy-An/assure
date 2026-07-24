@@ -132,10 +132,10 @@ identity system, or any other technology. It derives input conditions, success
 and rejection paths, state changes, and outbound effects from feature code,
 then executes the real code path.
 
-For login, it checks successful session creation with an accepted value and
-rejection without a session for invalid or unauthorized values. For a coupon,
-it checks that a grant is requested exactly once and that insufficient balance
-or duplicate requests cause no write.
+For a system with login, it checks successful authentication and session
+creation with an accepted value, then rejection without a session for invalid
+or unauthorized values. For data persistence, it checks that valid input is
+written exactly once and that invalid or unauthorized requests cause no write.
 
 Assure never connects these probes to a production database or identity
 provider. In the isolated run, only unsafe boundaries are replaced with

@@ -43,7 +43,10 @@ discovery; continue only after `<python-command>` is selected.
 
 2. Route by returned `kind`:
 
-   - `approved-current`: use `$assure:assure-verify`.
+   - `approved-current`: read only the `baseline.verification_policy` field
+     from `.assure/verification-manifest.yaml`. Use `$assure:assure-verify`
+     when it is `functional-probes-v1`; otherwise use `$assure:assure-map` once
+     to migrate the baseline before verification.
    - `absent`, `incomplete`, `draft`, `review`, `damaged`, or
      `approved-stale`: use `$assure:assure-map`.
 

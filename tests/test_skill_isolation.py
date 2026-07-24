@@ -67,6 +67,17 @@ class SkillIsolationTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertIn(value, normalized)
 
+    def test_main_workflow_migrates_pre_probe_baselines(self):
+        assure = (
+            PLUGIN_ROOT / "skills" / "assure" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        mapping = (
+            PLUGIN_ROOT / "skills" / "assure-map" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("baseline.verification_policy", assure)
+        self.assertIn("functional-probes-v1", assure)
+        self.assertIn("functional-probes-v1", mapping)
+
 
 if __name__ == "__main__":
     unittest.main()

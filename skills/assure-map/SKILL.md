@@ -86,9 +86,10 @@ discovery; continue only after `<python-command>` is selected.
 16. Record added, changed, deleted, uncovered, manual, and excluded scenarios
     with risk levels for the final report.
 17. Write baseline status `approved`, record the current Git commit as
-    provenance, and record the deterministic `source_snapshot`. Continue
-    directly to verification. A matching snapshot is current even when files
-    are uncommitted.
+    provenance, record the deterministic `source_snapshot`, and set
+    `baseline.verification_policy` to `functional-probes-v1`. Continue directly
+    to verification. A matching snapshot is current even when files are
+    uncommitted.
 
 Read `references/manifest-format.md` before creating or editing the manifest.
 Read `references/functional-probes.md` before creating a probe or classifying
