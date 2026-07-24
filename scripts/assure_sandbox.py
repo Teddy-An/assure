@@ -4,6 +4,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,8 +44,50 @@ class Sandbox:
     root: Path
     provider: str
     network: str = "disabled"
+    python_executable: str | None = None
+    node_executable: str | None = None
+
+    @property
+    def is_container(self) -> bool:
+        return self.provider not in {"local-isolated"}
+
+    def _local_env(self, block_network: bool) -> dict[str, str] | None:
+        if self.is_container:
+            return None
+        safe_home = self.root / ".assure-home"
+        safe_home.mkdir(exist_ok=True)
+        blocked = (
+            "AWS_", "AZURE_", "GOOGLE_", "GCLOUD_", "FIREBASE_",
+            "GITHUB_TOKEN", "GH_TOKEN", "NPM_TOKEN", "NODE_AUTH_TOKEN",
+        )
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not any(key.upper().startswith(prefix) for prefix in blocked)
+        }
+        env.update({
+            "CI": "1",
+            "HOME": str(safe_home),
+            "USERPROFILE": str(safe_home),
+        })
+        if block_network:
+            env.update({
+                "HTTP_PROXY": "http://127.0.0.1:9",
+                "HTTPS_PROXY": "http://127.0.0.1:9",
+                "ALL_PROXY": "http://127.0.0.1:9",
+                "NO_PROXY": "",
+            })
+        return env
+
+    def bootstrap_env(self) -> dict[str, str] | None:
+        return self._local_env(block_network=False)
+
+    def execution_env(self) -> dict[str, str] | None:
+        return self._local_env(block_network=True)
 
     def bootstrap(self, runners: set[str]) -> BootstrapResult:
+        if not self.is_container:
+            return self._bootstrap_local(runners)
         commands: list[list[str]] = []
         if runners & {"vitest", "jest"}:
             if not (self.root / "package-lock.json").exists():
@@ -122,7 +165,76 @@ class Sandbox:
                 )
         return BootstrapResult("ready", "dependencies installed without lifecycle scripts")
 
+    def _bootstrap_local(self, runners: set[str]) -> BootstrapResult:
+        if runners & {"vitest", "jest"}:
+            if not (self.root / "package-lock.json").exists():
+                return BootstrapResult(
+                    "unavailable",
+                    "package-lock.json is required for isolated Node dependency bootstrap",
+                )
+            npm = shutil.which("npm")
+            node = shutil.which("node")
+            if not npm or not node:
+                return BootstrapResult(
+                    "unavailable",
+                    "Node.js and npm are required for local isolated Node verification",
+                )
+            self.node_executable = node
+            command = [
+                npm,
+                "ci",
+                "--ignore-scripts",
+                "--no-bin-links",
+                "--no-audit",
+                "--no-fund",
+                "--cache",
+                str(self.root / ".assure-npm-cache"),
+            ]
+            result = _run_bootstrap(command, self.root, self.bootstrap_env())
+            if result is not None:
+                return result
+        if "pytest" in runners:
+            try:
+                probe = subprocess.run(
+                    [sys.executable, "-m", "pytest", "--version"],
+                    cwd=self.root,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=15,
+                    env=self.execution_env(),
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return BootstrapResult("failed", str(exc))
+            if probe.returncode != 0:
+                return BootstrapResult(
+                    "unavailable",
+                    "pytest is required for local isolated Python verification",
+                )
+            self.python_executable = sys.executable
+        return BootstrapResult(
+            "ready",
+            "dependencies prepared in an Assure-owned temporary copy",
+        )
+
     def wrap(self, argv: list[str], runner: str) -> list[str]:
+        if not self.is_container:
+            if runner == "pytest":
+                return [
+                    self.python_executable or sys.executable,
+                    "-m",
+                    "pytest",
+                    *argv[3:],
+                ]
+            node = self.node_executable or shutil.which("node")
+            if not node:
+                raise AssureError("Node.js is unavailable after bootstrap")
+            package = "vitest/vitest.mjs" if runner == "vitest" else "jest/bin/jest.js"
+            command = [node, str(self.root / "node_modules" / package), *argv[3:]]
+            if runner == "vitest":
+                command.append("--config=.assure-vitest.config.mjs")
+            return command
         image = "python:3.13" if runner == "pytest" else "node:22"
         if runner == "pytest":
             container_argv = ["python", "-m", "pytest", *argv[3:]]
@@ -132,7 +244,7 @@ class Sandbox:
                 "node_modules/vitest/vitest.mjs",
                 *argv[3:],
             ]
-            container_argv.append("--setupFiles=.assure-auto-mocks.ts")
+            container_argv.append("--config=.assure-vitest.config.mjs")
         elif runner == "jest":
             container_argv = [
                 "node",
@@ -189,10 +301,52 @@ def _contains_link(root: Path) -> bool:
     return False
 
 
+def _run_bootstrap(
+    command: list[str],
+    root: Path,
+    env: dict[str, str] | None = None,
+) -> BootstrapResult | None:
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return BootstrapResult("failed", str(exc))
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        return BootstrapResult(
+            "failed",
+            detail[-2000:] or "dependency bootstrap failed",
+        )
+    return None
+
+
+def _runtime_ready(executable: str) -> bool:
+    try:
+        completed = subprocess.run(
+            [executable, "info"],
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0
+
+
 def prepare_sandbox(project_root: Path) -> Sandbox:
-    provider = shutil.which("docker") or shutil.which("podman")
-    if not provider:
-        raise SandboxUnavailable("sandbox runtime is unavailable")
+    provider = None
+    for name in ("docker", "podman"):
+        candidate = shutil.which(name)
+        if candidate and _runtime_ready(candidate):
+            provider = Path(candidate).name
+            break
     root = Path(tempfile.mkdtemp(prefix="assure-sandbox-")).resolve()
     source = project_root.resolve()
     for item in source.iterdir():
@@ -206,7 +360,7 @@ def prepare_sandbox(project_root: Path) -> Sandbox:
             shutil.copytree(item, target, ignore=_copy_ignore)
         else:
             shutil.copy2(item, target)
-    return Sandbox(root=root, provider=Path(provider).name)
+    return Sandbox(root=root, provider=provider or "local-isolated")
 
 
 def cleanup_sandbox(root: Path) -> None:

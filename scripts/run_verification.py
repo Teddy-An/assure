@@ -125,6 +125,7 @@ def _start_automated_process(
     command: list[str],
     project_root: Path,
     log_handle: Any,
+    env: dict[str, str] | None = None,
 ) -> tuple[subprocess.Popen[Any], Any]:
     if os.name != "nt":
         return (
@@ -135,6 +136,7 @@ def _start_automated_process(
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
+                env=env,
             ),
             None,
         )
@@ -146,6 +148,7 @@ def _start_automated_process(
         stdin=subprocess.PIPE,
         stdout=log_handle,
         stderr=subprocess.STDOUT,
+        env=env,
     )
     try:
         if not _kernel32.AssignProcessToJobObject(job, int(process._handle)):
@@ -284,6 +287,7 @@ def run_automated(
                 command,
                 sandbox.root,
                 log_handle,
+                sandbox.execution_env(),
             )
             try:
                 process.wait(timeout=AUTOMATED_TIMEOUT_SECONDS)

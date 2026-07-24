@@ -31,6 +31,9 @@ class LocalTestSandbox:
             return [sys.executable, *argv[3:]]
         return argv
 
+    def execution_env(self) -> None:
+        return None
+
     def cleanup(self) -> None:
         pass
 

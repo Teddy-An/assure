@@ -19,8 +19,8 @@ verification baseline still matches the current code, or that unanswered
 manual checks were handled explicitly.
 
 Assure builds and approves a source-snapshot verification baseline, runs the
-full registered population in an isolated network-disabled sandbox, and
-reports release readiness from bounded evidence without routine prompts.
+full registered population from an Assure-owned temporary copy, and reports
+release readiness from bounded evidence without routine prompts.
 
 ## Autonomous and safe by default
 
@@ -28,14 +28,15 @@ One request performs discovery, test mapping, safe test generation, snapshot
 approval, and verification. Manual checks and missing capabilities are
 reported in the final result instead of interrupting the run.
 
-Automated checks run only in an independent temporary copy through Docker or
-Podman with networking disabled. Before the test phase, Assure may download
-lockfile-pinned dependencies in a credential-free container; package lifecycle
-scripts and binary links stay disabled. A missing lockfile or failed bootstrap
-becomes a final environment result. Project mocks take priority; Assure injects
-additional guards for fetch, WebSocket, HTTP/HTTPS, and supported Firebase
-boundaries. If a safe sandbox is unavailable, Assure returns a blocked final
-result and never falls back to the original working tree.
+Automated checks always run in an independent Assure-owned temporary copy.
+Docker or Podman is preferred when its daemon is available; otherwise Assure
+uses its own local-isolated runner instead of requiring an external sandbox.
+Before the test phase, Assure may download lockfile-pinned dependencies into
+that temporary copy; package lifecycle scripts and binary links stay disabled.
+A missing lockfile or failed bootstrap becomes a final environment result.
+Project mocks take priority; Assure injects additional guards for fetch,
+WebSocket, HTTP/HTTPS, and supported Firebase boundaries. No execution path
+falls back to the original working tree or inherits common cloud credentials.
 
 Human-facing output follows `.assure/config.yaml` `language: ko|en`; without
 an override, Korean locales use Korean and other locales use English.
@@ -229,8 +230,20 @@ Codex를 위한 증거 기반 전체 프로젝트 릴리스 검증 플러그인�
 현재 코드와 여전히 일치하는지, 답변되지 않은 수동 검사가 명시적으로
 처리됐는지는 증명하지 못합니다.
 
-Assure는 승인된 검증 기준선을 만들고 유지하며, 등록된 전체 항목을
-실행하고 제한된 증거를 바탕으로 릴리스 준비 상태를 판정합니다.
+Assure는 승인된 검증 기준선을 만들고 유지하며, Assure가 소유한 임시
+복사본에서 등록된 전체 항목을 실행하고 제한된 증거를 바탕으로 릴리스
+준비 상태를 판정합니다.
+
+## 자율적이며 기본적으로 안전한 실행
+
+자동 검증은 항상 원본 프로젝트와 분리된 Assure 소유 임시 복사본에서
+실행됩니다. Docker 또는 Podman 데몬을 사용할 수 있으면 우선 사용하지만,
+외부 sandbox가 없어도 Assure 자체 `local-isolated` runner로 동작합니다.
+잠금 파일 기반 의존성은 임시 복사본 안에만 준비하고 package lifecycle
+script와 binary link는 비활성화합니다. 프로젝트 mock을 우선 보존하며
+fetch, WebSocket, HTTP/HTTPS 및 지원되는 Firebase 경계에는 추가 보호를
+주입합니다. 어떤 실행 경로도 원본 작업 트리로 fallback하거나 일반적인
+클라우드 자격증명을 상속하지 않습니다.
 
 ## 무엇이 다른가
 

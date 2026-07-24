@@ -37,11 +37,15 @@ not an automatic production fix.
 
 ### Network and credentials
 
-- Prefer a cross-platform container runtime with network disabled and a
-  read-only source mount/copy.
+- Prefer a cross-platform container runtime with network disabled when one is
+  healthy, but keep containers optional. Assure must remain independently
+  functional through its local-isolated temporary-copy runner.
 - Strip credentials and cloud-service environment variables before execution.
-- If safe isolation cannot be provisioned, finish with
-  `sandbox-unavailable`; never fall back to the original host project.
+- Treat non-interference with the original project and production systems as
+  an invariant of every provider, not as a reason to require one provider.
+- If neither the preferred provider nor Assure's own isolated runner can
+  safely execute a scenario, finish that scenario as unavailable; never run
+  tests from the original host project.
 - Bootstrap dependencies automatically where permissions allow it. A failed
   bootstrap is a final environment result, not a conversational question.
 

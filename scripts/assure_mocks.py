@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ KNOWN_OUTBOUND = {"firebase", "fetch", "WebSocket", "node:http", "node:https"}
 EXCLUDED_SOURCE_DIRECTORIES = {
     ".git", ".next", "build", "coverage", "dist", "node_modules", "vendor",
 }
+VITEST_CONFIG = ".assure-vitest.config.mjs"
 
 
 def _project_sources(sandbox_root: Path) -> str:
@@ -81,4 +83,36 @@ def inject_mocks(sandbox_root: Path, framework: str) -> MockInjection:
         "vi.mock('node:https', async (load) => ({ ...(await load()), request: () => { throw new Error('Assure blocked HTTPS') } }))\n",
         encoding="utf-8",
     )
+    _write_vitest_config(sandbox_root)
     return result
+
+
+def _write_vitest_config(sandbox_root: Path) -> None:
+    candidates = [
+        "vitest.config.ts",
+        "vitest.config.mts",
+        "vitest.config.js",
+        "vitest.config.mjs",
+        "vite.config.ts",
+        "vite.config.mts",
+        "vite.config.js",
+        "vite.config.mjs",
+    ]
+    existing = next(
+        (name for name in candidates if (sandbox_root / name).exists()),
+        None,
+    )
+    if existing:
+        base_import = f"import baseConfig from {json.dumps(f'./{existing}')}\n"
+        export = "export default mergeConfig(baseConfig, assureConfig)\n"
+    else:
+        base_import = ""
+        export = "export default assureConfig\n"
+    (sandbox_root / VITEST_CONFIG).write_text(
+        "import { defineConfig, mergeConfig } from 'vitest/config'\n"
+        + base_import
+        + "const assureConfig = defineConfig({ test: { "
+        "setupFiles: ['./.assure-auto-mocks.ts'] } })\n"
+        + export,
+        encoding="utf-8",
+    )

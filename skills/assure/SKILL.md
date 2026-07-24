@@ -50,5 +50,8 @@ discovery; continue only after `<python-command>` is selected.
 3. After mapping, automatically approve the generated source snapshot and
    continue to `$assure:assure-verify` in the same turn. Do not ask the user
    to select tests, approve a baseline, or create a Git commit.
-4. Treat environment, sandbox, mock, manual, and coverage gaps as final result
+4. Treat Docker, Podman, and other external helpers as optional providers.
+   Assure must still run through its own temporary-copy isolation when no
+   helper is available. Never run tests from the original project tree.
+5. Treat environment, sandbox, mock, manual, and coverage gaps as final result
    states. Always return the best available verdict instead of pausing.
