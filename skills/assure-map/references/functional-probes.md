@@ -32,6 +32,9 @@ the product-owned behavior and replace only the unsafe boundary.
    data, wall-clock timing, and external availability.
 7. Prove sensitivity with a controlled mutation in an isolated workspace, then
    restore the mutation.
+8. Record `probe.entry_points`, all three `probe.cases`, and both
+   `probe.assertions` in the manifest. Use `<project-relative-file>#<symbol>`
+   for every entry point.
 
 An in-memory fake may model a boundary's documented contract, but it must not
 reimplement the product decision being tested. For example, fake user lookup
@@ -43,7 +46,8 @@ the supplied credential is accepted and whether a session is created.
 - Use `automated` only when the probe executes product behavior and asserts an
   observable outcome.
 - Use `uncovered` when no safe executable boundary can be reached or the probe
-  cannot distinguish correct from incorrect behavior.
+  cannot distinguish correct from incorrect behavior. Record every attempted
+  entry point and strategy, a supported blocker code, and a concrete reason.
 - Use `manual` only for outcomes that fundamentally require physical hardware,
   human perception or consent, or a legally controlled real-world action.
 - Never use missing Docker, an emulator, a browser driver, a test account, or
@@ -51,3 +55,7 @@ the supplied credential is accepted and whether a session is created.
 
 Static analysis, configuration inspection, and type checking can support probe
 construction, but cannot alone produce a passing functional result.
+
+Before approval, run `scripts/assure_probe_policy.py --project <root>`. Treat
+every validator error as required mapping work. Policy metadata without a
+successful validator result is not an approved functional-probe baseline.

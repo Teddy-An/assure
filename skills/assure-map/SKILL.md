@@ -83,13 +83,24 @@ discovery; continue only after `<python-command>` is selected.
     restore it.
 15. If a test reveals an existing defect, report it. Do not fix production code
     without a separate user request.
-16. Record added, changed, deleted, uncovered, manual, and excluded scenarios
+16. If no safe executable probe can be built, keep the scenario `uncovered`
+    only with `probe_attempt` evidence containing the product entry points,
+    attempted strategies, a supported blocker code, and a concrete reason.
+    Missing optional helpers alone are not valid evidence.
+17. Record added, changed, deleted, uncovered, manual, and excluded scenarios
     with risk levels for the final report.
-17. Write baseline status `approved`, record the current Git commit as
-    provenance, record the deterministic `source_snapshot`, and set
-    `baseline.verification_policy` to `functional-probes-v1`. Continue directly
-    to verification. A matching snapshot is current even when files are
-    uncommitted.
+18. Write baseline status `review`, record the current Git commit and
+    deterministic `source_snapshot`, and set `baseline.verification_policy` to
+    `functional-probes-v1`.
+19. Run
+    `<python-command> <assure-root>/scripts/assure_probe_policy.py --project <root>`.
+    Parse its JSON. For every reported error, repair the manifest or probe and
+    rerun the validator. Do not approve, verify, or report completion while it
+    exits nonzero. Do not replace a missing probe with an undocumented
+    `uncovered` scenario.
+20. Only after the validator returns `valid: true`, change baseline status to
+    `approved`, set `approved_at`, and continue directly to verification. A
+    matching snapshot is current even when files are uncommitted.
 
 Read `references/manifest-format.md` before creating or editing the manifest.
 Read `references/functional-probes.md` before creating a probe or classifying
@@ -103,6 +114,8 @@ an executable software behavior as manual or uncovered.
 - Treating an external dependency or missing helper as proof that a software
   behavior requires a person
 - Passing a scenario from static inspection without executing the behavior
+- Setting `functional-probes-v1` without a successful policy-validator result
+- Leaving an uncovered scenario without structured probe-attempt evidence
 - Calling a draft or partial list complete
 - Pausing for routine approval instead of returning a result
 

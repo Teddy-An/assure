@@ -43,10 +43,8 @@ discovery; continue only after `<python-command>` is selected.
 
 2. Route by returned `kind`:
 
-   - `approved-current`: read only the `baseline.verification_policy` field
-     from `.assure/verification-manifest.yaml`. Use `$assure:assure-verify`
-     when it is `functional-probes-v1`; otherwise use `$assure:assure-map` once
-     to migrate the baseline before verification.
+   - `approved-current`: use `$assure:assure-verify`. The state command has
+     already validated the functional-probe policy and its files.
    - `absent`, `incomplete`, `draft`, `review`, `damaged`, or
      `approved-stale`: use `$assure:assure-map`.
 
@@ -60,5 +58,8 @@ discovery; continue only after `<python-command>` is selected.
    tests do not prove a scenario. A missing emulator, container, test
    environment, or external service is not by itself a reason to request
    manual confirmation.
-6. Treat environment, sandbox, mock, manual, and coverage gaps as final result
+6. Never accept `functional-probes-v1` from manifest metadata alone. Require
+   the deterministic policy validator to confirm every probe or recorded
+   unavailable attempt before verification.
+7. Treat environment, sandbox, mock, manual, and coverage gaps as final result
    states. Always return the best available verdict instead of pausing.

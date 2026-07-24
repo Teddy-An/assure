@@ -17,6 +17,7 @@ if __package__:
     from .assure_common import AssureError, load_manifest, sha256_file, write_json
     from .assure_mocks import inject_mocks
     from .assure_output import detect_language, emit_json, localize
+    from .assure_probe_policy import require_valid_probe_policy
     from .assure_runners import build_runner_command
     from .assure_sandbox import Sandbox, SandboxUnavailable, prepare_sandbox
     from .assure_state import classify_project
@@ -24,6 +25,7 @@ else:
     from assure_common import AssureError, load_manifest, sha256_file, write_json
     from assure_mocks import inject_mocks
     from assure_output import detect_language, emit_json, localize
+    from assure_probe_policy import require_valid_probe_policy
     from assure_runners import build_runner_command
     from assure_sandbox import Sandbox, SandboxUnavailable, prepare_sandbox
     from assure_state import classify_project
@@ -239,6 +241,12 @@ def result_for_non_automated(scenario: dict[str, Any]) -> dict[str, Any]:
     verification = scenario["verification"]
     mode = verification["mode"]
     statuses = {"manual": "👁", "uncovered": "?", "excluded": "—"}
+    probe_attempt = verification.get("probe_attempt")
+    attempt_reason = (
+        probe_attempt.get("reason")
+        if isinstance(probe_attempt, dict)
+        else None
+    )
     return {
         "id": scenario["id"],
         "name": scenario["name"],
@@ -247,7 +255,7 @@ def result_for_non_automated(scenario: dict[str, Any]) -> dict[str, Any]:
         "mode": mode,
         "status": statuses[mode],
         "instructions": verification.get("instructions", []),
-        "reason": verification.get("reason"),
+        "reason": verification.get("reason") or attempt_reason,
     }
 
 
@@ -595,6 +603,7 @@ def execute_manifest(
     manifest_path: Path,
 ) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
+    require_valid_probe_policy(manifest, project_root)
     approved_manifest_identity = manifest_identity(manifest_path, manifest)
     scenarios = flatten_scenarios(manifest)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")

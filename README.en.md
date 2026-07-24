@@ -71,6 +71,12 @@ Assure automatically follows the workflow required by the project state:
 9. Report only irreducibly human and uncovered items.
 10. Return a release verdict.
 
+The functional-probe policy cannot pass by name alone. Before approval or
+execution, Assure validates the probe file, product-code entry point,
+success/failure/boundary cases, and result/side-effect assertions. A scenario
+that cannot support a probe must record the strategies attempted and a
+technical blocker; otherwise Assure marks the baseline stale and remaps it.
+
 Assure does not automatically edit production code. When a test exposes an
 existing defect, Assure reports it as verification evidence.
 

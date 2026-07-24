@@ -272,6 +272,7 @@ class SafetyModuleTests(unittest.TestCase):
                 "baseline:\n"
                 "  status: approved\n"
                 "  commit: '0000000000000000000000000000000000000000'\n"
+                "  verification_policy: functional-probes-v1\n"
                 "sections:\n"
                 "  - id: app\n"
                 "    name: App\n"
