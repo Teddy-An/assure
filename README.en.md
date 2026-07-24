@@ -8,6 +8,19 @@ full-product release readiness without production side effects.
 
 **English** | [한국어](README.md)
 
+| Version identity | Value |
+|---|---|
+| Assure policy version | `0.2.0-dev` |
+| Verification policy | `assure-generated-probes-v2` |
+| Probe schema | `2` |
+| Generator contract | `assure-llm-probe-v2` |
+
+Installed builds use `<policy-version>+codex.<cachebuster>`. The cachebuster
+only makes Codex reload an updated local plugin; the policy version is
+`0.2.0-dev`. At runtime Assure computes a distribution SHA-256 from its
+scripts and skills, records it in generated probes, and compares it with the
+current installation.
+
 > **Early beta:** Assure is usable today, but its manifest format and
 > installation flow may change.
 
@@ -89,6 +102,27 @@ execute a boundary that cannot be replaced safely.
    operation in one complete Sandbox plan. Obtain exactly one approval. After
    approval, perform the entire plan automatically and never prompt or pause
    while tests are running. If declined, do not start tests.
+
+## User execution contract
+
+Assure always enforces these three rules:
+
+1. **Approval happens exactly once before testing.**
+   After environment discovery, Assure presents one plan containing the stack,
+   dependencies, permissions, Sandbox structure, every `.assure/` write,
+   probes, adapters, commands, and cleanup. Approval authorizes the complete
+   Sandbox construction and test-preparation procedure. No later item requests
+   separate approval.
+2. **Probes from an older policy are replaced automatically.**
+   If the Assure version, distribution hash, probe schema, or generator
+   contract differs, stale Assure-owned files under `.assure/probes/` are
+   deleted without another question and regenerated through the current remap
+   policy. Project-owned tests are never modified or deleted.
+3. **Once testing starts, Assure continues to the final result.**
+   Dependency installation, permissions, probe generation, and Sandbox health
+   checks finish before testing. During tests, Assure never requests approval
+   or another choice. It records Passed, Failed, Unverified, or Confirm results
+   and continues to the final report.
 
 ### Isolation from other workflows
 
