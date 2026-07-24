@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
@@ -9,13 +10,19 @@ from typing import Any
 
 if __package__:
     from .assure_common import AssureError, load_manifest
+    from .assure_identity import VERIFICATION_POLICY
     from .assure_output import emit_json
+    from .assure_probe_compatibility import probe_compatibility
 else:
     from assure_common import AssureError, load_manifest
+    from assure_identity import VERIFICATION_POLICY
     from assure_output import emit_json
+    from assure_probe_compatibility import probe_compatibility
 
 
 POLICY = "functional-probes-v1"
+CURRENT_POLICY = VERIFICATION_POLICY
+SUPPORTED_POLICIES = {POLICY, CURRENT_POLICY}
 PROBE_CASES = {"success", "failure", "boundary"}
 PROBE_ASSERTIONS = {"result", "side-effects"}
 UNAVAILABLE_BLOCKERS = {
@@ -24,6 +31,7 @@ UNAVAILABLE_BLOCKERS = {
     "unsafe-boundary",
     "unsupported-runner",
 }
+RESOLUTION_STATUSES = {"unavailable", "not-applicable"}
 
 
 @dataclass(frozen=True)
@@ -102,6 +110,12 @@ def _validate_probe_source(
     except OSError as exc:
         return [f"{scenario_id}: cannot read probe file: {exc}"]
     errors: list[str] = []
+    compatibility = probe_compatibility(path)
+    if not compatibility["compatible"]:
+        errors.append(
+            f"{scenario_id}: generated probe is stale: "
+            f"{compatibility['reason']}"
+        )
     if len(source.strip()) < 40:
         errors.append(f"{scenario_id}: probe file has no executable test body")
     if runner in {"vitest", "jest"}:
@@ -109,6 +123,14 @@ def _validate_probe_source(
             errors.append(f"{scenario_id}: probe has no test declaration")
         if not re.search(r"\bexpect\s*\(", source):
             errors.append(f"{scenario_id}: probe has no result assertion")
+        if (
+            re.search(r"vi\.mock\(['\"]firebase/firestore['\"]", source)
+            and "ASSURE_STATEFUL_FIRESTORE_V1" not in source
+        ):
+            errors.append(
+                f"{scenario_id}: inline Firestore fake has no validated "
+                "stateful read-after-write contract"
+            )
     elif runner == "pytest":
         if not re.search(r"(?m)^\s*def\s+test_[A-Za-z0-9_]*\s*\(", source):
             errors.append(f"{scenario_id}: probe has no pytest test function")
@@ -228,6 +250,59 @@ def _validate_unavailable(
     reason = attempt.get("reason")
     if not isinstance(reason, str) or not reason.strip():
         errors.append(f"{scenario_id}: probe_attempt reason is missing")
+    resolution = attempt.get("resolution")
+    if not isinstance(resolution, dict):
+        errors.append(
+            f"{scenario_id}: probe_attempt capability resolution is missing"
+        )
+    else:
+        capability = resolution.get("capability")
+        if not isinstance(capability, str) or not capability.strip():
+            errors.append(
+                f"{scenario_id}: probe_attempt resolution capability is missing"
+            )
+        status = resolution.get("status")
+        if status not in RESOLUTION_STATUSES:
+            errors.append(
+                f"{scenario_id}: probe_attempt resolution status is invalid"
+            )
+        resolution_reason = resolution.get("reason")
+        if not isinstance(resolution_reason, str) or not resolution_reason.strip():
+            errors.append(
+                f"{scenario_id}: probe_attempt resolution reason is missing"
+            )
+    return errors
+
+
+def _validate_capability_overlay(project_root: Path) -> list[str]:
+    overlay = project_root / ".assure" / "capabilities" / "node"
+    if not overlay.exists():
+        return []
+    errors: list[str] = []
+    metadata_path = overlay / "metadata.json"
+    lock_path = overlay / "package-lock.json"
+    package_path = overlay / "package.json"
+    if not metadata_path.is_file() or not lock_path.is_file() or not package_path.is_file():
+        return ["node capability overlay is incomplete"]
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [f"node capability overlay metadata is invalid: {exc}"]
+    expected = metadata.get("package_lock_sha256")
+    actual = hashlib.sha256(lock_path.read_bytes()).hexdigest()
+    if not isinstance(expected, str) or expected != actual:
+        errors.append("node capability overlay package-lock integrity check failed")
+    source_lock = project_root / "package-lock.json"
+    expected_source = metadata.get("source_package_lock_sha256")
+    if not source_lock.is_file():
+        errors.append("node capability overlay source package-lock is missing")
+    elif (
+        not isinstance(expected_source, str)
+        or hashlib.sha256(source_lock.read_bytes()).hexdigest() != expected_source
+    ):
+        errors.append(
+            "node capability overlay is stale for the current project package-lock"
+        )
     return errors
 
 
@@ -239,8 +314,12 @@ def validate_probe_policy(
     errors: list[str] = []
     probe_count = 0
     unavailable_count = 0
-    if policy != POLICY:
-        errors.append(f"baseline verification_policy must be {POLICY}")
+    errors.extend(_validate_capability_overlay(project_root))
+    if policy not in SUPPORTED_POLICIES:
+        errors.append(
+            "baseline verification_policy must be "
+            f"{CURRENT_POLICY} (legacy {POLICY} is read-only compatible)"
+        )
     for section in manifest.get("sections", []):
         if not isinstance(section, dict):
             errors.append("manifest section is invalid")
@@ -255,6 +334,15 @@ def validate_probe_policy(
                 continue
             mode = verification.get("mode")
             strategy = verification.get("strategy")
+            if (
+                policy == CURRENT_POLICY
+                and mode == "automated"
+                and strategy != "functional-probe"
+            ):
+                errors.append(
+                    f"{_scenario_id(scenario)}: every automated scenario must "
+                    "use an Assure-generated functional probe"
+                )
             if mode == "automated" and strategy == "functional-probe":
                 probe_count += 1
                 errors.extend(

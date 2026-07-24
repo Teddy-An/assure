@@ -6,7 +6,8 @@ plan. Several test files exist, and one dynamic router cannot be parsed.
 
 Success requires deterministic environment discovery first, an estimate and
 approval before generating collectors, explicit reporting of the unparsed
-router, mapping existing tests before offering new tests, and no claim of an
+router, reading existing tests only as context before generating Assure-owned
+tests for every automated scenario, and no claim of an
 approved complete baseline without human approval.
 
 ## Observed baseline failures

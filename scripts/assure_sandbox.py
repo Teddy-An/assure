@@ -12,8 +12,10 @@ from pathlib import Path
 
 if __package__:
     from .assure_common import AssureError
+    from .assure_sandbox_profile import load_sandbox_profile
 else:
     from assure_common import AssureError
+    from assure_sandbox_profile import load_sandbox_profile
 
 
 EXCLUDED = {
@@ -48,6 +50,7 @@ class Sandbox:
     python_executable: str | None = None
     node_executable: str | None = None
     local_guard: str | None = None
+    pytest_plugins: list[str] | None = None
 
     def __post_init__(self) -> None:
         if not self.network:
@@ -65,7 +68,9 @@ class Sandbox:
         if self.is_container:
             return None
         safe_home = self.root / ".assure-home"
+        safe_temp = self.root / ".assure-tmp"
         safe_home.mkdir(exist_ok=True)
+        safe_temp.mkdir(exist_ok=True)
         blocked = (
             "AWS_", "AZURE_", "GOOGLE_", "GCLOUD_", "FIREBASE_",
             "GITHUB_TOKEN", "GH_TOKEN", "NPM_TOKEN", "NODE_AUTH_TOKEN",
@@ -79,6 +84,9 @@ class Sandbox:
             "CI": "1",
             "HOME": str(safe_home),
             "USERPROFILE": str(safe_home),
+            "TMPDIR": str(safe_temp),
+            "TMP": str(safe_temp),
+            "TEMP": str(safe_temp),
         })
         if block_network:
             env.update({
@@ -94,6 +102,199 @@ class Sandbox:
 
     def execution_env(self) -> dict[str, str] | None:
         return self._local_env(block_network=True)
+
+    def preflight(self, runners: set[str] | None = None) -> None:
+        if self.is_container:
+            if not runners:
+                return
+            if runners == {"pytest"}:
+                image = "python:3.13"
+                probe = [
+                    "python",
+                    "-c",
+                    (
+                        "from pathlib import Path; "
+                        "p=Path('/workspace/.assure-preflight'); "
+                        "p.write_text('ok'); p.unlink()"
+                    ),
+                ]
+            else:
+                image = "node:22"
+                probe = [
+                    "node",
+                    "-e",
+                    (
+                        "const fs=require('fs');"
+                        "const p='/workspace/.assure-preflight';"
+                        "fs.writeFileSync(p,'ok');fs.unlinkSync(p)"
+                    ),
+                ]
+            try:
+                completed = subprocess.run(
+                    [
+                        self.provider,
+                        "run",
+                        "--rm",
+                        "--network",
+                        "none",
+                        "--volume",
+                        f"{self.root}:/workspace",
+                        "--workdir",
+                        "/workspace",
+                        image,
+                        *probe,
+                    ],
+                    cwd=self.root,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=30,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise SandboxUnavailable(
+                    f"container isolation preflight failed: {exc}"
+                ) from exc
+            if completed.returncode != 0:
+                detail = (completed.stderr or completed.stdout).strip()
+                raise SandboxUnavailable(
+                    "container isolation preflight failed before scenario "
+                    f"execution: {detail[-1000:] or completed.returncode}"
+                )
+            return
+        if not self.local_guard:
+            raise SandboxUnavailable(
+                "local OS filesystem and network isolation is unavailable"
+            )
+        outside = self.root.parent / f"{self.root.name}-preflight-outside"
+        source = (
+            "import os, socket, sys, tempfile\n"
+            "root = os.path.realpath(sys.argv[1])\n"
+            "outside = sys.argv[2]\n"
+            "handle, temporary = tempfile.mkstemp(prefix='assure-preflight-')\n"
+            "os.write(handle, b'ok')\n"
+            "os.close(handle)\n"
+            "if os.path.commonpath([root, os.path.realpath(temporary)]) != root:\n"
+            "    raise SystemExit('temporary path escaped sandbox')\n"
+            "os.unlink(temporary)\n"
+            "try:\n"
+            "    open(outside, 'w', encoding='utf-8').write('unsafe')\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    os.unlink(outside)\n"
+            "    raise SystemExit('outside write was not blocked')\n"
+            "network = socket.socket()\n"
+            "try:\n"
+            "    network.bind(('127.0.0.1', 0))\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    network.close()\n"
+            "    raise SystemExit('network bind was not blocked')\n"
+            "network.close()\n"
+        )
+        try:
+            completed = subprocess.run(
+                [
+                    self.local_guard,
+                    "-f",
+                    str(self.root / ".assure-sandbox.sb"),
+                    sys.executable,
+                    "-c",
+                    source,
+                    str(self.root),
+                    str(outside),
+                ],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+                env=self.execution_env(),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise SandboxUnavailable(f"isolation preflight failed: {exc}") from exc
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()
+            raise SandboxUnavailable(
+                "isolation preflight failed before scenario execution: "
+                f"{detail[-1000:] or f'exit code {completed.returncode}'}"
+            )
+
+    def validate_test_environment(
+        self,
+        runners: set[str],
+        require_stateful_firestore: bool = False,
+    ) -> None:
+        if "vitest" in runners:
+            health = self.root / ".assure-sandbox-health.test.ts"
+            assertions = [
+                "expect(typeof globalThis.fetch).toBe('function')",
+                "await expect(globalThis.fetch('https://example.invalid')).rejects.toThrow('Assure blocked network')",
+            ]
+            if require_stateful_firestore:
+                assertions.append(
+                    "expect((globalThis as any).__ASSURE_FIRESTORE__?.contract)"
+                    ".toBe('ASSURE_STATEFUL_FIRESTORE_V1')"
+                )
+            health.write_text(
+                "import { expect, test } from 'vitest'\n"
+                "test('assure sandbox health', async () => {\n  "
+                + "\n  ".join(assertions)
+                + "\n})\n",
+                encoding="utf-8",
+            )
+            argv = [
+                "node",
+                "node_modules/vitest/vitest.mjs",
+                "run",
+                health.name,
+                "-t",
+                "assure sandbox health",
+            ]
+            runner = "vitest"
+        elif "pytest" in runners:
+            health = self.root / ".assure_sandbox_health_test.py"
+            health.write_text(
+                "def test_safe():\n"
+                "    assert 1 + 1 == 2\n",
+                encoding="utf-8",
+            )
+            argv = [
+                "python",
+                "-m",
+                "pytest",
+                health.name,
+            ]
+            runner = "pytest"
+        else:
+            return
+        try:
+            command = self.wrap(argv, runner)
+            completed = subprocess.run(
+                command,
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+                env=self.execution_env(),
+            )
+        except (OSError, subprocess.TimeoutExpired, AssureError) as exc:
+            raise SandboxUnavailable(
+                f"sandbox test-environment health check failed: {exc}"
+            ) from exc
+        finally:
+            health.unlink(missing_ok=True)
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()
+            raise SandboxUnavailable(
+                "sandbox test-environment health check failed before product "
+                f"scenarios: {detail[-2000:] or completed.returncode}"
+            )
 
     def bootstrap(self, runners: set[str]) -> BootstrapResult:
         if not self.is_container:
@@ -235,6 +436,11 @@ class Sandbox:
                     self.python_executable or sys.executable,
                     "-m",
                     "pytest",
+                    *[
+                        argument
+                        for plugin in (self.pytest_plugins or [])
+                        for argument in ("-p", plugin)
+                    ],
                     *argv[3:],
                 ]
             else:
@@ -390,6 +596,40 @@ def _copy_functional_probes(source: Path, sandbox_root: Path) -> None:
     shutil.copytree(probes, target, ignore=_copy_ignore)
 
 
+def _copy_generated_adapters(source: Path, sandbox_root: Path) -> None:
+    adapters = source / ".assure" / "adapters"
+    if not adapters.exists():
+        return
+    if not adapters.is_dir() or _contains_link(adapters):
+        raise SandboxUnavailable(
+            "Assure generated adapters must be a link-free directory"
+        )
+    target = sandbox_root / ".assure" / "adapters"
+    target.parent.mkdir(exist_ok=True)
+    shutil.copytree(adapters, target, ignore=_copy_ignore)
+
+
+def _apply_node_capability_overlay(source: Path, sandbox_root: Path) -> None:
+    overlay = source / ".assure" / "capabilities" / "node"
+    if not overlay.exists():
+        return
+    if not overlay.is_dir() or _contains_link(overlay):
+        raise SandboxUnavailable(
+            "Assure node capability overlay must be a link-free directory"
+        )
+    for name in ("package.json", "package-lock.json", "metadata.json"):
+        path = overlay / name
+        if not path.is_file() or path.is_symlink():
+            raise SandboxUnavailable(
+                f"Assure node capability overlay is incomplete: {name}"
+            )
+    target = sandbox_root / ".assure" / "capabilities" / "node"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(overlay, target)
+    shutil.copy2(overlay / "package.json", sandbox_root / "package.json")
+    shutil.copy2(overlay / "package-lock.json", sandbox_root / "package-lock.json")
+
+
 def _run_bootstrap(
     command: list[str],
     root: Path,
@@ -430,6 +670,14 @@ def _runtime_ready(executable: str) -> bool:
 
 
 def prepare_sandbox(project_root: Path) -> Sandbox:
+    profile_path = project_root.resolve() / ".assure" / "sandbox-profile.json"
+    if profile_path.exists():
+        try:
+            load_sandbox_profile(project_root)
+        except AssureError as exc:
+            raise SandboxUnavailable(
+                f"sandbox profile validation failed before execution: {exc}"
+            ) from exc
     provider = None
     for name in ("docker", "podman"):
         candidate = shutil.which(name)
@@ -462,6 +710,8 @@ def prepare_sandbox(project_root: Path) -> Sandbox:
             shutil.copy2(item, target)
     try:
         _copy_functional_probes(source, root)
+        _copy_generated_adapters(source, root)
+        _apply_node_capability_overlay(source, root)
         if local_guard:
             _write_macos_profile(root, source)
     except BaseException:

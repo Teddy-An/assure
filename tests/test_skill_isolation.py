@@ -59,8 +59,8 @@ class SkillIsolationTests(unittest.TestCase):
             "3. `py -3 --version`",
             "Python 3.9 or newer",
             "Python 2",
-            "explicit user approval",
-            "rerun runtime discovery",
+            "one complete Sandbox plan",
+            "Do not ask separately",
             "<python-command>",
         )
         forbidden = (
@@ -100,10 +100,53 @@ class SkillIsolationTests(unittest.TestCase):
         mapping = (
             PLUGIN_ROOT / "skills" / "assure-map" / "SKILL.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("functional-probes-v1", assure)
+        self.assertIn("assure-generated-probes-v2", assure)
         self.assertIn("policy validator", assure)
-        self.assertIn("functional-probes-v1", mapping)
+        self.assertIn("assure-generated-probes-v2", mapping)
         self.assertIn("assure_probe_policy.py", mapping)
+
+    def test_mapping_never_uses_project_tests_as_release_evidence(self):
+        mapping = SKILL_PATHS[1].read_text(encoding="utf-8")
+        self.assertIn(
+            "Never register or execute them as Assure release evidence",
+            " ".join(mapping.split()),
+        )
+        self.assertIn("assure_identity.py", mapping)
+        self.assertIn("generation_marker", mapping)
+
+    def test_skills_require_preparation_approval_before_execution_or_creation(self):
+        assure = SKILL_PATHS[0].read_text(encoding="utf-8")
+        mapping = SKILL_PATHS[1].read_text(encoding="utf-8")
+        verification = SKILL_PATHS[2].read_text(encoding="utf-8")
+        self.assertIn("preparation-required", assure)
+        self.assertIn("one batch approval", assure)
+        self.assertIn("one complete Sandbox plan", mapping)
+        self.assertIn("without another prompt", " ".join(mapping.split()))
+        self.assertIn("without a preparation prompt", verification)
+        self.assertIn(
+            "Never execute a scenario before Sandbox bootstrap",
+            verification,
+        )
+
+    def test_skills_require_selector_isolation_and_structured_failures(self):
+        mapping = SKILL_PATHS[1].read_text(encoding="utf-8")
+        verification = SKILL_PATHS[2].read_text(encoding="utf-8")
+        self.assertIn(
+            "selector that isolates that scenario",
+            " ".join(mapping.split()),
+        )
+        self.assertIn("failure ID", verification)
+        self.assertIn("shared cause", verification)
+
+    def test_skills_require_one_common_sandbox_before_probes(self):
+        assure = SKILL_PATHS[0].read_text(encoding="utf-8")
+        mapping = SKILL_PATHS[1].read_text(encoding="utf-8")
+        verification = SKILL_PATHS[2].read_text(encoding="utf-8")
+        self.assertIn("assure_sandbox_profile.py", assure)
+        self.assertIn(".assure/sandbox-profile.json", mapping)
+        self.assertIn("same Sandbox contract", mapping)
+        self.assertIn("before any product scenario runs", verification)
+        self.assertIn("without a preparation prompt", verification)
 
     def test_main_workflow_declares_core_safety_and_mapping_invariants(self):
         assure = (

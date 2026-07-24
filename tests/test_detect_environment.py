@@ -5,9 +5,33 @@ import unittest
 from pathlib import Path
 
 from scripts.detect_environment import detect_environment
+from scripts.assure_capabilities import assess_capabilities
 
 
 class EnvironmentDetectorTests(unittest.TestCase):
+    def test_capabilities_require_only_minimal_local_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "package.json").write_text(
+                '{"dependencies":{"react":"19.0.0"},'
+                '"devDependencies":{"vitest":"4.0.0"}}',
+                encoding="utf-8",
+            )
+            (root / "firestore.rules").write_text(
+                "rules_version = '2';\n",
+                encoding="utf-8",
+            )
+            result = assess_capabilities(root)
+
+        by_id = {item["id"]: item for item in result["capabilities"]}
+        self.assertEqual(
+            by_id["react-dom-execution"]["status"],
+            "preparation-required",
+        )
+        self.assertNotIn("firestore-rules-execution", by_id)
+        self.assertNotIn("browser-execution", by_id)
+        self.assertFalse(result["host"]["administrator_required"])
+
     def test_detects_next_nest_jest_and_pytest(self):
         root = Path(__file__).parent / "fixtures" / "sample_project"
         result = detect_environment(root)

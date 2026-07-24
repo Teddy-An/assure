@@ -15,7 +15,7 @@
 | Risk | `X` | `👁` or `?` |
 |---|---|---|
 | `critical` | blocked | blocked |
-| `high` | blocked | approval-required |
+| `high` | blocked | blocked |
 | `normal` | warning | warning |
 
 All `O` results and properly approved exclusions produce `releasable`.

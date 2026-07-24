@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -16,24 +17,45 @@ from typing import Any, Optional
 if __package__:
     from .assure_common import AssureError, load_manifest, sha256_file, write_json
     from .assure_mocks import inject_mocks
+    from .assure_identity import current_identity
     from .assure_output import detect_language, emit_json, localize
     from .assure_probe_policy import require_valid_probe_policy
     from .assure_runners import build_runner_command
-    from .assure_sandbox import Sandbox, SandboxUnavailable, prepare_sandbox
+    from .assure_sandbox import (
+        Sandbox,
+        SandboxUnavailable,
+        prepare_sandbox,
+    )
     from .assure_state import classify_project
 else:
     from assure_common import AssureError, load_manifest, sha256_file, write_json
     from assure_mocks import inject_mocks
+    from assure_identity import current_identity
     from assure_output import detect_language, emit_json, localize
     from assure_probe_policy import require_valid_probe_policy
     from assure_runners import build_runner_command
-    from assure_sandbox import Sandbox, SandboxUnavailable, prepare_sandbox
+    from assure_sandbox import (
+        Sandbox,
+        SandboxUnavailable,
+        prepare_sandbox,
+    )
     from assure_state import classify_project
 
 
 RISKS = {"critical", "high", "normal"}
 MODES = {"automated", "manual", "uncovered", "excluded"}
 AUTOMATED_TIMEOUT_SECONDS = 15
+_RUNNER_INFRASTRUCTURE_MARKERS = (
+    "operation not permitted",
+    "permission denied",
+)
+_NO_TESTS_MARKERS = (
+    "(0 test)",
+    "tests  no tests",
+    "no tests ran",
+    "collected 0 items",
+)
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 _WINDOWS_COMMAND_SUPERVISOR = (
     "import subprocess, sys\n"
     "if sys.stdin.buffer.read(1) != b'1':\n"
@@ -273,6 +295,60 @@ def safe_artifact_name(scenario_id: str) -> str:
     return f"{safe_prefix}-{digest}"
 
 
+def _runner_infrastructure_failure(log: str) -> str | None:
+    lowered = log.lower()
+    if (
+        any(marker in lowered for marker in _RUNNER_INFRASTRUCTURE_MARKERS)
+        and any(marker in lowered for marker in _NO_TESTS_MARKERS)
+    ):
+        return (
+            "verification runner could not start tests inside the isolated "
+            "environment; no product test executed"
+        )
+    return None
+
+
+def _compact_failure(log: str) -> dict[str, str] | None:
+    clean = _ANSI_ESCAPE.sub("", log)
+    test_name = None
+    message = None
+    location = None
+    counts = None
+    for raw_line in clean.splitlines():
+        line = raw_line.strip()
+        if line.startswith("FAIL  ") and " > " in line:
+            test_name = line.removeprefix("FAIL  ").strip()
+        elif line.startswith("AssertionError:") and message is None:
+            message = line[:500]
+        elif line.startswith("Error:") and message is None:
+            message = line[:500]
+        elif line.startswith("❯ ") and location is None:
+            candidate = line.removeprefix("❯ ").strip()
+            if re.search(r":\d+(?::\d+)?$", candidate):
+                location = candidate[:500]
+        elif line.startswith("Tests") and (
+            "failed" in line or "passed" in line
+        ):
+            counts = " ".join(line.split())[:200]
+        elif line.startswith("FAILED ") and test_name is None:
+            test_name = line.removeprefix("FAILED ").strip()[:500]
+        elif line.startswith("● ") and test_name is None:
+            test_name = line.removeprefix("● ").strip()[:500]
+    if not any((test_name, message, location, counts)):
+        return None
+    identity = "\n".join(
+        value or "" for value in (test_name, message, location)
+    )
+    return {
+        "kind": "assertion-failure" if message else "test-failure",
+        "id": hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12],
+        **({"test": test_name} if test_name else {}),
+        **({"message": message} if message else {}),
+        **({"location": location} if location else {}),
+        **({"counts": counts} if counts else {}),
+    }
+
+
 def run_automated(
     project_root: Path,
     scenario: dict[str, Any],
@@ -280,6 +356,12 @@ def run_automated(
     sandbox: Sandbox,
 ) -> dict[str, Any]:
     tests = scenario["verification"]["tests"]
+    strategy = scenario["verification"].get("strategy")
+    evidence_source = (
+        "functional-probe"
+        if strategy == "functional-probe"
+        else "project-test"
+    )
     scenario_artifact = artifacts / f"{safe_artifact_name(scenario['id'])}.log"
     scenario_artifact.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
@@ -305,23 +387,55 @@ def run_automated(
                     f"command timed out after {AUTOMATED_TIMEOUT_SECONDS} seconds\n"
                 )
                 exit_code = 124
-                continue
+                log_handle.write(
+                    "remaining cases for this verification item were not run "
+                    "after the first failure\n"
+                )
+                break
             finally:
                 if job is not None:
                     _kernel32.CloseHandle(job)
             if process.returncode != 0:
                 exit_code = process.returncode
+                log_handle.write(
+                    "remaining cases for this verification item were not run "
+                    "after the first failure\n"
+                )
+                break
     duration = round(time.monotonic() - started, 3)
+    infrastructure_reason = None
+    failure = None
+    if exit_code != 0:
+        log = scenario_artifact.read_text(encoding="utf-8", errors="replace")
+        infrastructure_reason = _runner_infrastructure_failure(log)
+        if not infrastructure_reason:
+            failure = _compact_failure(log)
     return {
         "id": scenario["id"],
         "name": scenario["name"],
         "section": scenario["section_name"],
         "risk": scenario["risk"],
-        "mode": "automated",
-        "status": "O" if exit_code == 0 else "X",
+        "mode": evidence_source,
+        "evidence_source": evidence_source,
+        "status": (
+            "O"
+            if exit_code == 0
+            else "?"
+            if infrastructure_reason
+            else "X"
+        ),
         "exit_code": exit_code,
         "duration_seconds": duration,
         "artifact": str(scenario_artifact),
+        "reason": infrastructure_reason,
+        "failure": failure,
+        "failure_origin": (
+            "verification-probe"
+            if failure and evidence_source == "functional-probe"
+            else "product-test"
+            if failure
+            else None
+        ),
     }
 
 
@@ -335,13 +449,13 @@ def apply_verdict(results: list[dict[str, Any]]) -> str:
         elif risk == "high" and status == "X":
             priority = max(priority, 3)
         elif risk == "high" and status in {"👁", "?"}:
-            priority = max(priority, 2)
+            priority = max(priority, 3)
         elif risk == "normal" and status in {"X", "👁", "?"}:
             priority = max(priority, 1)
     return {
         0: "releasable",
         1: "warning",
-        2: "approval-required",
+        2: "blocked",
         3: "blocked",
     }[priority]
 
@@ -355,7 +469,11 @@ def _markdown_cell(value: Any) -> str:
 
 def _result_detail(result: dict[str, Any], language: str) -> str:
     details: list[str] = []
-    if result.get("mode") == "automated":
+    if result.get("mode") in {
+        "automated",
+        "project-test",
+        "functional-probe",
+    }:
         if result.get("exit_code") is not None:
             details.append(
                 localize(
@@ -366,6 +484,46 @@ def _result_detail(result: dict[str, Any], language: str) -> str:
             )
         if result.get("duration_seconds") is not None:
             details.append(f"{result['duration_seconds']}s")
+        failure = result.get("failure")
+        if isinstance(failure, dict):
+            labels = (
+                {
+                    "kind": "오류 유형",
+                    "id": "오류 ID",
+                    "test": "실패 테스트",
+                    "message": "오류 메시지",
+                    "location": "발생 위치",
+                    "counts": "테스트 결과",
+                }
+                if language == "ko"
+                else {
+                    "kind": "Failure type",
+                    "id": "Failure ID",
+                    "test": "Failed test",
+                    "message": "Message",
+                    "location": "Location",
+                    "counts": "Test result",
+                }
+            )
+            for field in ("kind", "id", "test", "message", "location", "counts"):
+                if failure.get(field):
+                    details.append(f"{labels[field]}: {failure[field]}")
+            if result.get("failure_origin"):
+                origin = result["failure_origin"]
+                if language == "ko":
+                    origin = (
+                        "Assure 기능 프로브"
+                        if origin == "verification-probe"
+                        else "프로젝트 테스트"
+                    )
+                    details.append(f"실패 출처: {origin}")
+                else:
+                    origin = (
+                        "Assure functional probe"
+                        if origin == "verification-probe"
+                        else "project test"
+                    )
+                    details.append(f"Failure origin: {origin}")
     if result.get("reason"):
         details.append(str(result["reason"]))
     details.extend(str(item) for item in result.get("instructions", []))
@@ -455,6 +613,7 @@ def _feature_tree(
 def render_report(summary: dict[str, Any]) -> str:
     counts = summary["counts"]
     language = summary.get("language", "en")
+    generated_by = summary.get("generated_by") or current_identity()
     verdict = localize(f"verdict.{summary['verdict']}", language)
     lines = [
         f"# {localize('report.title', language)}",
@@ -463,6 +622,9 @@ def render_report(summary: dict[str, Any]) -> str:
         "|---|---|",
         f"| {localize('report.verdict_label', language)} | {verdict} (`{summary['verdict']}`) |",
         f"| {localize('report.baseline_commit_label', language)} | `{summary['baseline_commit']}` |",
+        f"| Assure version | `{generated_by['assure_version']}` |",
+        f"| Assure distribution SHA-256 | `{generated_by['distribution_sha256']}` |",
+        f"| Probe schema | `{generated_by['probe_schema']}` |",
         f"| {localize('report.generated_at_label', language)} | {summary['generated_at']} |",
         f"| {localize('report.provider', language)} | {_markdown_cell(summary['sandbox'].get('provider'))} |",
         f"| {localize('report.network', language)} | {_markdown_cell(summary['sandbox'].get('network'))} |",
@@ -662,24 +824,49 @@ def execute_manifest(
                 if item["verification"]["mode"] == "automated"
                 for test in item["verification"]["tests"]
             }
-            bootstrap_result = sandbox.bootstrap(runners)
-            bootstrap = {
-                "status": bootstrap_result.status,
-                "detail": bootstrap_result.detail,
-                "network": bootstrap_result.network,
-            }
-            if bootstrap_result.status != "ready":
-                raise SandboxUnavailable(bootstrap_result.detail)
-            for framework in sorted(runners):
-                injected = inject_mocks(sandbox.root, framework)
-                if mock_result is None:
-                    mock_result = injected
-                else:
-                    mock_result.injected.extend(injected.injected)
-                    mock_result.conflicts.extend(injected.conflicts)
-                    mock_result.unverifiable.extend(injected.unverifiable)
-            if mock_result and mock_result.unverifiable:
-                raise SandboxUnavailable("; ".join(mock_result.unverifiable))
+            if not sandbox.is_container:
+                sandbox.preflight(runners)
+            # A valid Sandbox profile records the user's one-time approval for
+            # the complete preparation plan. Dependency bootstrap is therefore
+            # automatic here and may never pause an active verification run.
+            if sandbox is not None:
+                bootstrap_result = sandbox.bootstrap(runners)
+                bootstrap = {
+                    "status": bootstrap_result.status,
+                    "detail": bootstrap_result.detail,
+                    "network": bootstrap_result.network,
+                }
+                if bootstrap_result.status != "ready":
+                    raise SandboxUnavailable(bootstrap_result.detail)
+                if sandbox.is_container:
+                    sandbox.preflight(runners)
+                for framework in sorted(runners):
+                    adapter_framework = framework
+                    injected = inject_mocks(
+                        sandbox.root,
+                        adapter_framework,
+                    )
+                    if mock_result is None:
+                        mock_result = injected
+                    else:
+                        mock_result.injected.extend(injected.injected)
+                        mock_result.conflicts.extend(injected.conflicts)
+                        mock_result.unverifiable.extend(injected.unverifiable)
+                        mock_result.pytest_plugins.extend(
+                            injected.pytest_plugins
+                        )
+                if mock_result and mock_result.unverifiable:
+                    raise SandboxUnavailable("; ".join(mock_result.unverifiable))
+                if mock_result and mock_result.pytest_plugins:
+                    sandbox.pytest_plugins = list(
+                        dict.fromkeys(mock_result.pytest_plugins)
+                    )
+                sandbox.validate_test_environment(
+                    runners,
+                    require_stateful_firestore=bool(
+                        mock_result and "firebase" in mock_result.injected
+                    ),
+                )
         except SandboxUnavailable as exc:
             if bootstrap["status"] == "not-required":
                 bootstrap = {
@@ -734,6 +921,7 @@ def execute_manifest(
                     }
     counts = count_statuses(results)
     summary = {
+        "generated_by": current_identity(),
         "language": detect_language(project_root),
         "verdict": apply_verdict(results),
         "baseline_commit": manifest["baseline"]["commit"],
@@ -769,7 +957,7 @@ def execute_manifest(
 
 
 def exit_code_for_verdict(verdict: str) -> int:
-    return 1 if verdict in {"blocked", "approval-required"} else 0
+    return 1 if verdict == "blocked" else 0
 
 
 def main() -> int:
