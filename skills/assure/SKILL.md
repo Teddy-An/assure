@@ -15,6 +15,29 @@ startup, planning, debugging, development, or completion workflows. Use only
 the Assure skills explicitly routed below. System, developer, and user
 instructions still take precedence.
 
+## Invariants
+
+- Never modify the original project or production source.
+- Never read or write production data, inherit production credentials, or call
+  production services.
+- Work without optional providers; use Docker, Podman, emulators, and browser
+  drivers only when they safely strengthen isolation or evidence.
+- Report network assurance exactly: containers with network disabled are
+  `os-blocked`; local credential, proxy, and runtime controls are
+  `runtime-guarded`. Never describe runtime guards as OS isolation.
+- Fail closed at every outbound boundary. If the active runner has neither a
+  safe adapter nor a preserved project mock, do not execute that outbound
+  scenario; record it as unverified with probe-attempt evidence.
+- Minimize tokens and elapsed work without reducing trust or scope. Prefer
+  deterministic collectors and compact machine summaries, read only necessary
+  source and evidence, and never repeat commands or analysis without a new
+  reason.
+- Start from features and user scenarios. Use deterministic full-project
+  inventory, then read only source needed to trace each behavior backward from
+  its entry point and observable effects.
+- Require executed behavior, verify results and forbidden side effects, report
+  unresolved evidence honestly, and regress the complete approved baseline.
+
 ## Python runtime
 
 Before running any script under `<plugin-root>/scripts`, discover a supported

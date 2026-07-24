@@ -74,6 +74,34 @@ class SkillIsolationTests(unittest.TestCase):
         self.assertIn("functional-probes-v1", mapping)
         self.assertIn("assure_probe_policy.py", mapping)
 
+    def test_main_workflow_declares_core_safety_and_mapping_invariants(self):
+        assure = (
+            PLUGIN_ROOT / "skills" / "assure" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        mapping = (
+            PLUGIN_ROOT / "skills" / "assure-map" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        verification = (
+            PLUGIN_ROOT / "skills" / "assure-verify" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        for phrase in (
+            "Never modify the original project",
+            "Never read or write production data",
+            "Work without optional providers",
+            "Report network assurance exactly",
+            "Fail closed at every outbound boundary",
+            "Minimize tokens and elapsed work",
+            "trace each behavior backward",
+            "forbidden side effects",
+            "complete approved baseline",
+        ):
+            self.assertIn(phrase, assure)
+        self.assertIn("Do not sequentially read every source body", mapping)
+        self.assertIn("common effect-ledger shape", mapping)
+        self.assertIn("production data or service access", verification)
+        self.assertIn("exact network assurance", verification)
+
 
 if __name__ == "__main__":
     unittest.main()

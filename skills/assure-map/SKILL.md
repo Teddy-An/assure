@@ -49,8 +49,12 @@ discovery; continue only after `<python-command>` is selected.
 6. Report candidate, changed, unchanged, and deleted counts, every adapter
    failure, and every excluded dynamic structure. Unresolved
    scope prevents an `approved` baseline.
-7. Read `.assure/discovery-index.json`. Read original source only for candidates
-   whose feature or test relationship remains ambiguous.
+7. Read `.assure/discovery-index.json`. Build from features and user scenarios,
+   then trace backward through only the source needed to identify each
+   behavior's entry point, conditions, state changes, authorization boundaries,
+   and outbound effects. Do not sequentially read every source body. Read
+   original source only for candidates whose relationship or behavior remains
+   ambiguous.
 8. Build two levels: feature section, then user scenario. Use deeper cases only
    for high-risk behavior.
 9. Map existing tests before creating Assure-owned functional probes. Record
@@ -66,12 +70,18 @@ discovery; continue only after `<python-command>` is selected.
     success, failure, and boundary inputs. Replace only unsafe outbound
     boundaries with deterministic in-memory fakes, record attempted effects,
     and assert both required effects and forbidden effects. Never change
-    production code.
+    production code. Use a common effect-ledger shape for target, operation,
+    payload, count, and blocked status. Prefer the active runner's adapter,
+    preserve compatible project mocks, and create only the smallest
+    Assure-owned adapter required. Never reproduce product decision logic
+    inside an adapter.
 12. Prefer the project's existing test runner for probes. A missing Docker
     daemon, emulator, browser driver, test account, or optional helper is not
     enough to leave a scenario manual or uncovered. Use helpers when available;
     otherwise exercise the nearest real code boundary through the Assure-owned
-    probe.
+    probe. If no safe adapter or project mock can fail closed for a detected
+    outbound boundary, do not execute that scenario. Record the attempted
+    adapters and technical blocker as `uncovered`.
 13. Mark a probe automated only when it executes behavior and asserts an
     observable result. Static source inspection alone is supporting evidence,
     never a passing functional result. Reserve manual verification for

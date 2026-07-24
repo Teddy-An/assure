@@ -43,9 +43,17 @@ class BootstrapResult:
 class Sandbox:
     root: Path
     provider: str
-    network: str = "disabled"
+    network: str = ""
     python_executable: str | None = None
     node_executable: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.network:
+            self.network = (
+                "runtime-guarded"
+                if self.provider == "local-isolated"
+                else "os-blocked"
+            )
 
     @property
     def is_container(self) -> bool:

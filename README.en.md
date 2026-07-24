@@ -50,6 +50,97 @@ covers it. It creates an Assure-owned functional probe that calls real product
 code, replaces only unsafe database, identity, payment, messaging, or API
 boundaries, and verifies results and effects.
 
+## Core principles
+
+1. **Do not modify production source**: Never change the original worktree or
+   production code.
+2. **Do not touch production data**: Never read or write production databases,
+   storage, or account data.
+3. **Do not call production services**: Never send requests to production
+   identity, payment, messaging, or external APIs.
+4. **Work independently**: Run with Assure isolation and functional probes even
+   without Docker, Podman, emulators, or browser drivers. When safely available,
+   use them as providers that strengthen isolation and evidence realism.
+5. **Minimize tokens and elapsed work**: Without sacrificing verification
+   trust or full scope, use deterministic collectors first, read only necessary
+   source and evidence, and avoid repeated commands, analysis, and reporting.
+6. **Trace backward from behavior**: Do not read every source file in order.
+   Build features and user scenarios from the full inventory, then trace only
+   the entry points, state transitions, authorization boundaries, and effects
+   needed by each scenario.
+7. **Require execution evidence**: Use static analysis to design verification,
+   never to declare a behavioral pass without execution.
+8. **Verify outcomes and effects**: Check expected results, exact required
+   writes, and the absence of forbidden writes or calls.
+9. **Report honestly**: Record attempts and reasons for anything that cannot be
+   verified. Reserve human confirmation for physical, perceptual, legal, or
+   consent-dependent outcomes.
+10. **Regress the complete baseline**: Run every approved feature scenario, not
+   only changed files, to detect effects on other functionality.
+
+## Verification flow
+
+```text
+User request
+└─ Inspect Assure state
+   ├─ Approved baseline is current ───────────────────────┐
+   └─ Baseline absent, damaged, or changed                │
+      └─ Collect project inventory                        │
+         ├─ Stack, routes, schemas, and test relationships│
+         └─ Do not read every source body sequentially    │
+            └─ Build feature structure                    │
+               └─ Feature                                 │
+                  └─ User scenario                        │
+                     └─ Trace required code backward      │
+                        ├─ Real entry point                │
+                        ├─ Accept/reject conditions        │
+                        ├─ State transitions              │
+                        ├─ Authorization boundaries       │
+                        └─ Outbound effects               │
+                           │                              │
+                           ├─ Existing test proves it     │
+                           │  └─ Map existing test        │
+                           │                              │
+                           └─ Existing test is insufficient
+                              └─ Create Assure probe
+                                 ├─ Success input
+                                 ├─ Failure input
+                                 ├─ Boundary input
+                                 ├─ Execute real product code
+                                 └─ Replace only unsafe boundaries
+                                    with fakes or spies
+                                       ├─ Assert result and state
+                                       ├─ Assert required effects
+                                       └─ Assert forbidden effects
+                                             │
+                              ┌──────────────┘
+                              └─ Validate probe policy
+                                 ├─ File and entry point exist
+                                 ├─ Success/failure/boundary cases
+                                 ├─ Result/effect assertions
+                                 └─ Record attempts for unverified items
+                                    └─ Approve baseline and snapshot
+                                                        │
+   ┌────────────────────────────────────────────────────┘
+   └─ Execute every approved scenario
+      └─ Select execution provider
+         ├─ Docker or Podman available → stronger isolation
+         └─ No helper → Assure local-isolated
+            └─ Separate source, credentials, and production network
+               └─ Collect evidence for every scenario
+                  ├─ Passed
+                  ├─ Failed
+                  ├─ Confirm
+                  ├─ Unverified
+                  └─ Excluded
+                     └─ Feature tree plus complete result table
+                        └─ Release verdict
+                           ├─ releasable
+                           ├─ blocked
+                           ├─ approval-required
+                           └─ warning
+```
+
 ## One request, end to end
 
 Open a project in Codex and ask:
@@ -130,6 +221,55 @@ stronger isolation. Without one, Assure remains functional through its own
 `local-isolated` runner.
 
 External tools are optional providers, not requirements for Assure to work.
+
+### Safety assurance levels
+
+Assure never reports a stronger network guarantee than the active isolation
+actually provides.
+
+| Label | Meaning |
+|---|---|
+| `os-blocked` | External connections are blocked at the OS or container layer, such as Docker or Podman `network none` |
+| `runtime-guarded` | Known outbound boundaries are guarded with a temporary HOME, stripped credentials, blocking proxies, and supported runtime mocks |
+| `not-run` | Automated verification did not run, so no network guarantee was applied |
+
+`local-isolated` is `runtime-guarded`, not an OS-level network block. Without
+OS isolation, Assure replaces supported runtime boundaries fail-closed. If it
+cannot build a safe replacement for an outbound scenario, it does not execute
+that scenario and reports it as Unverified.
+
+```text
+Functional probe
+├─ Product result and state assertions
+├─ Common effect ledger
+│  ├─ Required calls, writes, and events
+│  └─ Forbidden calls, writes, and events
+├─ Runner adapter
+│  ├─ Vitest: vi.mock and setup
+│  ├─ Jest: jest.mock and setup
+│  ├─ pytest: fixtures and monkeypatch
+│  └─ Other: project mock or Assure-owned adapter
+├─ Runtime guard
+│  ├─ Stripped credentials
+│  ├─ Separate HOME
+│  └─ Blocked HTTP, WebSocket, and SDK boundaries
+└─ Execution provider
+   ├─ Docker or Podman → os-blocked
+   └─ local-isolated → runtime-guarded
+```
+
+Assure does not reimplement every language or external SDK. It uses the
+smallest adapter needed for the discovered runner and product boundary.
+Existing project mocks are preserved. An adapter records controlled responses,
+targets, payloads, counts, and blocking decisions—not product decision logic.
+
+```text
+Outbound boundary found
+├─ Official runner adapter   → replace and record effects
+├─ Existing project mock     → preserve, connect, and record
+├─ Small adapter is feasible → create it under .assure
+└─ No safe replacement       → forbid the call and record Unverified evidence
+```
 
 ## Functional verification without helper tools
 

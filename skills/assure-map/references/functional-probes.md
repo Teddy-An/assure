@@ -41,6 +41,37 @@ reimplement the product decision being tested. For example, fake user lookup
 may return a controlled user; the real login code must still decide whether
 the supplied credential is accepted and whether a session is created.
 
+## Isolate and record outbound effects
+
+Represent outbound observations consistently across runners:
+
+```text
+effect:
+  kind: database-write
+  target: users/session
+  operation: create
+  payload: controlled value
+  count: 1
+  blocked: true
+```
+
+Use the active runner's native mechanism: Vitest `vi.mock`, Jest `jest.mock`,
+pytest fixtures or `monkeypatch`, or a compatible project mock. Preserve a
+project mock when it already owns the boundary. Create an Assure adapter only
+under `.assure/`, keep it as small as possible, and make unexpected access fail
+closed. The adapter may supply a controlled boundary response and record
+effects; it must not reproduce product decisions.
+
+Treat execution providers and boundary adapters as separate layers:
+
+- Docker or Podman with `network none` provides `os-blocked` assurance.
+- `local-isolated` provides `runtime-guarded` assurance through stripped
+  credentials, a separate HOME, blocking proxies, and supported runtime mocks.
+- Never label runtime guards as OS-level isolation.
+- If no safe runner adapter or project mock covers a detected outbound
+  boundary, do not execute the scenario. Record the attempted adapter and
+  blocker as uncovered evidence.
+
 ## Classify the result
 
 - Use `automated` only when the probe executes product behavior and asserts an

@@ -45,6 +45,8 @@ discovery; continue only after `<python-command>` is selected.
 3. Run
    `<python-command> <assure-root>/scripts/run_verification.py --project <root>` once.
    Do not execute scenario commands individually from the conversation.
+   Never run from the original tree, inherit production credentials, or permit
+   production data or service access.
 4. Parse only the command's stdout JSON summary. A nonzero exit for `blocked`
    or `approval-required` is a verification result, not permission to inspect
    other evidence.
@@ -53,6 +55,7 @@ discovery; continue only after `<python-command>` is selected.
    not files to read.
 6. Present the verdict first. Then use Markdown tables for:
    - baseline commit, project root, execution provider, and report path;
+   - exact network assurance: `os-blocked`, `runtime-guarded`, or `not-run`;
    - result counts using localized labels, never raw status symbols;
    - every scenario with number, risk, section, ID, name, mode, localized
      result, and detail.
@@ -63,6 +66,7 @@ discovery; continue only after `<python-command>` is selected.
    Confirm/확인, and `—` to Excluded/제외. Never expose the raw symbols as
    the user-facing result.
    Do not replace the complete table with prose or a partial bullet list.
+   Never describe `runtime-guarded` as complete OS network isolation.
 7. Manual checks never pause the initial run. Report them together as pending.
    When the user later responds, accept only an explicit `confirmed`, `failed`,
    `indeterminate`, or `excluded` response. Require an actor for every response,

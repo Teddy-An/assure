@@ -55,3 +55,13 @@ Translate internal status codes for human-facing tables:
 | `?` | Unverified | 미검증 |
 | `👁` | Confirm | 확인 |
 | `—` | Excluded | 제외 |
+
+## Safety assurance
+
+Report the runner's exact network assurance without upgrading the claim:
+
+| Internal | Meaning |
+|---|---|
+| `os-blocked` | OS or container network isolation is active |
+| `runtime-guarded` | Credentials, proxy settings, and supported runtime boundaries are guarded, without an OS-level guarantee |
+| `not-run` | Automated verification did not run |

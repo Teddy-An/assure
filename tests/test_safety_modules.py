@@ -48,6 +48,7 @@ class SafetyModuleTests(unittest.TestCase):
             try:
                 self.assertEqual(sandbox.provider, "local-isolated")
                 self.assertNotEqual(sandbox.root, Path(folder))
+                self.assertEqual(sandbox.network, "runtime-guarded")
             finally:
                 sandbox.cleanup()
 
@@ -63,8 +64,13 @@ class SafetyModuleTests(unittest.TestCase):
                 sandbox = prepare_sandbox(Path(folder))
             try:
                 self.assertEqual(sandbox.provider, "local-isolated")
+                self.assertEqual(sandbox.network, "runtime-guarded")
             finally:
                 sandbox.cleanup()
+
+    def test_container_reports_os_blocked_network(self):
+        sandbox = Sandbox(Path("/tmp/assure-test"), "docker")
+        self.assertEqual(sandbox.network, "os-blocked")
 
     def test_local_execution_environment_strips_credentials(self):
         with tempfile.TemporaryDirectory() as folder:
