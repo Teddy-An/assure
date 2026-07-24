@@ -56,12 +56,12 @@ discovery; continue only after `<python-command>` is selected.
    - result counts using localized labels, never raw status symbols;
    - every scenario with number, risk, section, ID, name, mode, localized
      result, and detail.
-   Put blocking and unresolved rows before the complete result table. Keep
-   manual instructions in the detail cell with `<br>` separators. Map `O` to
+   Show every scenario once in one complete result table; use the verdict and
+   result-count table to summarize blockers. Keep manual instructions in the
+   detail cell with `<br>` separators. Map `O` to
    Passed/통과, `X` to Failed/실패, `?` to Unverified/미검증, `👁` to
    Confirm/확인, and `—` to Excluded/제외. Never expose the raw symbols as
-   the user-facing result. Preserve each scenario's complete-table row number
-   in the unresolved table.
+   the user-facing result.
    Do not replace the complete table with prose or a partial bullet list.
 7. Manual checks never pause the initial run. Report them together as pending.
    When the user later responds, accept only an explicit `confirmed`, `failed`,

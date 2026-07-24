@@ -443,23 +443,12 @@ def render_report(summary: dict[str, Any]) -> str:
         f"| {_display_result('?', language)} | {counts.get('?', 0)} |",
         f"| {_display_result('—', language)} | {counts.get('—', 0)} |",
         "",
-        f"## {localize('report.unresolved', language)}",
-        "",
-    ]
-    unresolved = [
-        result
-        for result in summary["results"]
-        if result["status"] in {"X", "👁", "?"}
     ]
     positions = {
         result["id"]: index
         for index, result in enumerate(summary["results"], start=1)
     }
-    if not unresolved:
-        lines.append(localize("report.none", language))
-    else:
-        lines.extend(_result_table(unresolved, language, positions))
-    lines.extend(["", f"## {localize('report.all_results', language)}", ""])
+    lines.extend([f"## {localize('report.all_results', language)}", ""])
     lines.extend(_result_table(summary["results"], language, positions))
     lines.extend([
         "",

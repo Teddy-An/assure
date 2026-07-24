@@ -35,9 +35,11 @@ All `O` results and properly approved exclusions produce `releasable`.
 1. Verdict
 2. Metadata table: environment, baseline commit, project root, report path
 3. Status-count table
-4. Blocking and unresolved result table
-5. Complete scenario result table
-6. Artifact directory
+4. Complete scenario result table
+5. Artifact directory
+
+Show each scenario exactly once. Summarize blocking and unresolved results in
+the verdict and status-count table instead of repeating those rows separately.
 
 Keep the scenario columns stable:
 

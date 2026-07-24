@@ -77,6 +77,13 @@ class OutputTests(unittest.TestCase):
             "| 번호 | 위험도 | 영역 | ID | 검증 항목 | 방식 | 결과 | 상세 |",
             report,
         )
+        self.assertEqual(
+            report.count(
+                "| 번호 | 위험도 | 영역 | ID | 검증 항목 | 방식 | 결과 | 상세 |"
+            ),
+            1,
+        )
+        self.assertNotIn("차단 및 미해결 결과", report)
         self.assertIn(
             "| 1 | critical | 결제 | `payments.refund` | "
             "환불 \\| 중복 방지 | 자동 | 실패 |",
