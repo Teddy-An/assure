@@ -148,6 +148,73 @@ class SafetyModuleTests(unittest.TestCase):
             finally:
                 sandbox.cleanup()
 
+    def test_only_assure_functional_probes_are_copied_from_assure_state(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            probes = root / ".assure" / "probes"
+            probes.mkdir(parents=True)
+            (probes / "login.assure.test.ts").write_text(
+                "export {}",
+                encoding="utf-8",
+            )
+            (root / ".assure" / "verification-manifest.yaml").write_text(
+                "secret manifest state",
+                encoding="utf-8",
+            )
+            (root / ".assure" / "reports").mkdir()
+            (root / ".assure" / "reports" / "report.md").write_text(
+                "private report",
+                encoding="utf-8",
+            )
+
+            with patch("scripts.assure_sandbox.shutil.which", return_value=None):
+                sandbox = prepare_sandbox(root)
+            try:
+                self.assertTrue(
+                    (
+                        sandbox.root
+                        / ".assure"
+                        / "probes"
+                        / "login.assure.test.ts"
+                    ).exists()
+                )
+                self.assertFalse(
+                    (
+                        sandbox.root
+                        / ".assure"
+                        / "verification-manifest.yaml"
+                    ).exists()
+                )
+                self.assertFalse(
+                    (sandbox.root / ".assure" / "reports").exists()
+                )
+            finally:
+                sandbox.cleanup()
+
+    def test_linked_assure_functional_probes_are_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            assure = root / ".assure"
+            assure.mkdir()
+            external = root / "external-probes"
+            external.mkdir()
+            try:
+                (assure / "probes").symlink_to(
+                    external,
+                    target_is_directory=True,
+                )
+            except OSError:
+                self.skipTest("directory symlinks are unavailable")
+
+            with (
+                patch("scripts.assure_sandbox.shutil.which", return_value=None),
+                self.assertRaisesRegex(
+                    SandboxUnavailable,
+                    "link-free directory",
+                ),
+            ):
+                prepare_sandbox(root)
+
     def test_user_firebase_mock_wins_and_network_guards_are_injected(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

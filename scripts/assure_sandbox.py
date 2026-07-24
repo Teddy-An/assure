@@ -291,6 +291,8 @@ def _copy_ignore(_directory: str, names: list[str]) -> set[str]:
 
 
 def _contains_link(root: Path) -> bool:
+    if root.is_symlink():
+        return True
     for path in root.rglob("*"):
         if path.is_symlink():
             return True
@@ -299,6 +301,19 @@ def _contains_link(root: Path) -> bool:
             if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                 return True
     return False
+
+
+def _copy_functional_probes(source: Path, sandbox_root: Path) -> None:
+    probes = source / ".assure" / "probes"
+    if not probes.exists():
+        return
+    if not probes.is_dir() or _contains_link(probes):
+        raise SandboxUnavailable(
+            "Assure functional probes must be a link-free directory"
+        )
+    target = sandbox_root / ".assure" / "probes"
+    target.parent.mkdir()
+    shutil.copytree(probes, target, ignore=_copy_ignore)
 
 
 def _run_bootstrap(
@@ -360,6 +375,11 @@ def prepare_sandbox(project_root: Path) -> Sandbox:
             shutil.copytree(item, target, ignore=_copy_ignore)
         else:
             shutil.copy2(item, target)
+    try:
+        _copy_functional_probes(source, root)
+    except BaseException:
+        cleanup_sandbox(root)
+        raise
     return Sandbox(root=root, provider=provider or "local-isolated")
 
 

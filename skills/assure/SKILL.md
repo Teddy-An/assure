@@ -53,5 +53,9 @@ discovery; continue only after `<python-command>` is selected.
 4. Treat Docker, Podman, and other external helpers as optional providers.
    Assure must still run through its own temporary-copy isolation when no
    helper is available. Never run tests from the original project tree.
-5. Treat environment, sandbox, mock, manual, and coverage gaps as final result
+5. Treat Assure-owned functional probes as the default fallback when existing
+   tests do not prove a scenario. A missing emulator, container, test
+   environment, or external service is not by itself a reason to request
+   manual confirmation.
+6. Treat environment, sandbox, mock, manual, and coverage gaps as final result
    states. Always return the best available verdict instead of pausing.

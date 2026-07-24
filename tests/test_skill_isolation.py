@@ -52,6 +52,21 @@ class SkillIsolationTests(unittest.TestCase):
                 for value in forbidden:
                     self.assertNotIn(value, text)
 
+    def test_mapping_prefers_functional_probes_over_manual_helper_gaps(self):
+        text = (
+            PLUGIN_ROOT / "skills" / "assure-map" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        normalized = " ".join(text.split())
+        for value in (
+            ".assure/probes/",
+            "success, failure, and boundary inputs",
+            "assert both required effects and forbidden effects",
+            "missing Docker daemon",
+            "Static source inspection alone",
+        ):
+            with self.subTest(value=value):
+                self.assertIn(value, normalized)
+
 
 if __name__ == "__main__":
     unittest.main()

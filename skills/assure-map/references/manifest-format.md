@@ -26,9 +26,30 @@ tests:
     selector: valid credentials return access token
 ```
 
-Manual verification requires a non-empty `instructions` list. Excluded
-verification requires `reason`, `approved_by`, and `approved_at`. Uncovered
-verification has no additional fields.
+When an existing project test does not prove the scenario, create an
+Assure-owned functional probe:
+
+```yaml
+mode: automated
+strategy: functional-probe
+tests:
+  - runner: vitest
+    args: [run, .assure/probes/auth/login.assure.test.ts]
+    selector: accepts valid credentials and rejects invalid credentials
+```
+
+Store functional probes only under `.assure/probes/`. Assure copies that
+directory into its temporary execution snapshot; it does not copy other
+`.assure` state. A probe must execute product behavior, cover at least a
+success or rejection path appropriate to the scenario, and assert observable
+output or state. Static source inspection is not an automated verification.
+
+Manual verification requires a non-empty `instructions` list and is reserved
+for physical, perceptual, legal, or human-consent outcomes that cannot be
+represented by controlled input and observable output. A missing external
+service or optional helper does not qualify. Excluded verification requires
+`reason`, `approved_by`, and `approved_at`. Uncovered verification has no
+additional fields.
 
 ## Project adapter contract
 

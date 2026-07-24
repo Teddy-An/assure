@@ -23,6 +23,35 @@ services or mutate the original project.
 The workflow may not modify production code. A test finding remains a result,
 not an automatic production fix.
 
+## Assure-owned functional probes
+
+Existing project tests are the first evidence source, not a prerequisite for
+functional verification. For every uncovered software scenario, mapping must:
+
+1. derive the executable entry point, accepted and rejected inputs, observable
+   outputs, state transitions, and outbound effects;
+2. create a project-specific probe under `.assure/probes/`;
+3. execute real product code with controlled success, failure, authorization,
+   duplicate, and boundary inputs;
+4. replace only unsafe outbound boundaries with deterministic in-memory fakes
+   or spies;
+5. assert both required effects and the absence of forbidden effects.
+
+Assure copies only `.assure/probes/` into the temporary source snapshot. It
+must not copy the manifest, reports, artifacts, credentials, or other Assure
+state into the execution environment.
+
+A missing container, emulator, browser driver, test account, database, or
+external service is not by itself a reason for manual verification. Optional
+helpers may strengthen evidence, but Assure-owned probes are the default
+fallback. Static inspection may guide probe construction but cannot produce a
+passing functional result.
+
+Manual verification is reserved for outcomes that fundamentally require
+physical hardware, human perception or consent, or a legally controlled
+real-world action that cannot be represented by controlled input and
+observable output.
+
 ## Safety model
 
 ### Source and dependency isolation

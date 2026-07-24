@@ -3,8 +3,8 @@
 **Go beyond passing tests and verify full-product release readiness.**
 
 Assure is a Codex plugin that discovers product features and user scenarios,
-connects them to existing tests, exposes missing verification, runs the full
-registered baseline, and produces an evidence-based release verdict.
+executes real product code with valid, invalid, and boundary inputs, and judges
+full-product release readiness without production side effects.
 
 **English** | [한국어](README.md)
 
@@ -27,8 +27,8 @@ Assure turns those questions into a repeatable, full-project verification
 baseline.
 
 ```text
-Discover features → Define scenarios → Map existing tests → Expose gaps
-                  → Run the full baseline → Produce a risk-based verdict
+Discover features → Derive inputs, outputs, and effects → Map existing tests
+                  → Create Assure probes → Isolate and run → Judge release
 ```
 
 ## What makes it different?
@@ -37,14 +37,18 @@ Discover features → Define scenarios → Map existing tests → Expose gaps
 |---|---|---|---|
 | Starts from | Existing tests | Current request and conversation | Product features and user scenarios |
 | Scope | Tests that were invoked | Scope selected in the session | Entire registered baseline |
-| Missing coverage | Invisible | Easy to overlook | Explicitly marked `uncovered` |
+| Missing coverage | Invisible | Easy to overlook | First exercised with an Assure probe |
 | Manual checks | Managed elsewhere | Left in conversation | Stored in the baseline and results |
 | Change tracking | Test-result focused | Lost with the session | Git plus a source snapshot |
 | Execution safety | Depends on the host | Depends on the approach | Assure-owned temporary copy |
+| External systems | Real connection or separate environment | Depends on the approach | Only unsafe boundaries are replaced |
 | Final output | Pass/fail | Explanation or code changes | Risk-based release verdict |
 
-Assure does not replace Vitest, Jest, pytest, or CI. It adds **verification
-scope, visible gaps, manual evidence, and release decisions** on top of them.
+Assure uses Vitest, Jest, pytest, and other existing runners, but it does not
+send a scenario directly to manual confirmation just because no existing test
+covers it. It creates an Assure-owned functional probe that calls real product
+code, replaces only unsafe database, identity, payment, messaging, or API
+boundaries, and verifies results and effects.
 
 ## One request, end to end
 
@@ -59,11 +63,13 @@ Assure automatically follows the workflow required by the project state:
 1. Inspect the project structure and test environment.
 2. Organize user scenarios by product feature.
 3. Map existing tests before generating anything.
-4. Add missing tests only when they can be generated safely.
-5. Record the current source snapshot as the verification baseline.
-6. Run the complete registered automated population.
-7. Report manual checks and uncovered scenarios.
-8. Return a release verdict.
+4. Derive valid, invalid, and boundary inputs and expected outcomes.
+5. Create project-specific functional probes under `.assure/probes/`.
+6. Block unsafe external connections and record attempted effects.
+7. Record the current source snapshot as the verification baseline.
+8. Run the complete automated population in the isolated copy.
+9. Report only irreducibly human and uncovered items.
+10. Return a release verdict.
 
 Assure does not automatically edit production code. When a test exposes an
 existing defect, Assure reports it as verification evidence.
@@ -118,6 +124,29 @@ stronger isolation. Without one, Assure remains functional through its own
 `local-isolated` runner.
 
 External tools are optional providers, not requirements for Assure to work.
+
+## Functional verification without helper tools
+
+Assure is not tied to Firebase, a particular database, OAuth, an internal
+identity system, or any other technology. It derives input conditions, success
+and rejection paths, state changes, and outbound effects from feature code,
+then executes the real code path.
+
+For login, it checks successful session creation with an accepted value and
+rejection without a session for invalid or unauthorized values. For a coupon,
+it checks that a grant is requested exactly once and that insufficient balance
+or duplicate requests cause no write.
+
+Assure never connects these probes to a production database or identity
+provider. In the isolated run, only unsafe boundaries are replaced with
+in-memory fakes or spies. The probe verifies both:
+
+- the user-visible result and state transition;
+- required outbound effects and the absence of forbidden effects.
+
+Docker, emulators, and browser drivers can provide stronger evidence when
+available. Assure-owned probes must still work without them, and a missing
+helper or test account alone is not a reason for manual verification.
 
 ## Run a specific workflow
 
@@ -200,6 +229,7 @@ Start a new Codex thread after installation so the Assure skills are loaded.
 ├── verification-manifest.yaml  # Features, scenarios, risks, baseline
 ├── discovery-index.json        # Full and incremental inventory
 ├── adapters/                   # Optional read-only collectors
+├── probes/                     # Assure-owned project-specific functional checks
 ├── artifacts/                  # Automated verification evidence
 └── reports/                    # JSON and Markdown results
 ```
@@ -216,7 +246,9 @@ The verification baseline is stored in
 
 - Assure is early beta, and its manifest format may change.
 - Dynamic structures and custom frameworks may require project adapters.
-- Browser usability, real permissions, and production data may remain manual.
+- Physical-device perception, human visual judgment or consent, and legally
+  controlled real-world actions may remain manual when they cannot be
+  represented by controlled input and observable output.
 - Assure cannot guarantee coverage for structures it cannot discover.
 - Failure diagnosis and production fixes are separate from verification.
 
